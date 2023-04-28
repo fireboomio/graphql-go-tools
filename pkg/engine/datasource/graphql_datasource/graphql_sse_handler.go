@@ -41,18 +41,22 @@ func newSSEConnectionHandler(ctx context.Context, conn *http.Client, opts GraphQ
 func (h *gqlSSEConnectionHandler) StartBlocking(sub Subscription) {
 	reqCtx := sub.ctx
 
+	doneCh := make(chan []byte)
 	dataCh := make(chan []byte)
 	errCh := make(chan []byte)
 	defer func() {
+		close(doneCh)
 		close(dataCh)
 		close(errCh)
 		close(sub.next)
 	}()
 
-	go h.subscribe(reqCtx, sub, dataCh, errCh)
+	go h.subscribe(reqCtx, sub, doneCh, dataCh, errCh)
 
 	for {
 		select {
+		case <-doneCh:
+			return
 		case data := <-dataCh:
 			sub.next <- data
 		case err := <-errCh:
@@ -64,7 +68,7 @@ func (h *gqlSSEConnectionHandler) StartBlocking(sub Subscription) {
 	}
 }
 
-func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscription, dataCh, errCh chan []byte) {
+func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscription, doneCh, dataCh, errCh chan []byte) {
 	// if we used the downstream context, we got a panic if the downstream client disconnects immediately after the request was sent
 	// this happens, e.g. with React strict mode which renders the component twice
 	// to solve the issue, we use a separate context for the origin request
@@ -113,6 +117,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 		msg, err := reader.ReadEvent()
 		if err != nil {
 			if err == io.EOF {
+				doneCh <- []byte(err.Error())
 				return
 			}
 
