@@ -182,7 +182,7 @@ func (v *variablesDefaultValueExtractionVisitor) traverseValue(value ast.Value, 
 }
 
 func (v *variablesDefaultValueExtractionVisitor) saveArgumentsWithTypeNotNull(operationVariableValueRef, defTypeRef int) {
-	if v.definition.Types[defTypeRef].TypeKind != ast.TypeKindNonNull {
+	if defTypeRef != -1 && v.definition.Types[defTypeRef].TypeKind != ast.TypeKindNonNull {
 		return
 	}
 

@@ -5,6 +5,7 @@ package resolve
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -921,6 +922,44 @@ func (r *Resolver) resolveBoolean(ctx *Context, boolean *Boolean, data []byte, b
 	return nil
 }
 
+type queryRawResp struct {
+	PrismaType  string `json:"prisma__type"`
+	PrismaValue any    `json:"prisma__value"`
+}
+
+func handleQueryRawResp(value, data []byte) (result []byte) {
+	data, _, _, _ = jsonparser.Get(data, "queryRaw")
+	if data == nil {
+		return nil
+	}
+
+	var queryRaw []map[string]queryRawResp
+	err := json.Unmarshal(value, &queryRaw)
+	if err != nil {
+		return
+	}
+
+	var normalArrayResp []map[string]any
+	for _, item := range queryRaw {
+		normalMap := make(map[string]any)
+		for k, v := range item {
+			normalMap[k] = v.PrismaValue
+		}
+		normalArrayResp = append(normalArrayResp, normalMap)
+	}
+	result, _ = json.Marshal(normalArrayResp)
+	return
+}
+
+func handleExecuteRawResp(value, data []byte) (result []byte) {
+	data, _, _, _ = jsonparser.Get(data, "executeRaw")
+	if data == nil {
+		return nil
+	}
+
+	return value
+}
+
 func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringBuf *BufPair) error {
 	var (
 		value     []byte
@@ -938,6 +977,15 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 			}
 		}
 		if value != nil && valueType != jsonparser.Null {
+			if raw := handleQueryRawResp(value, data); raw != nil {
+				stringBuf.Data.WriteBytes(raw)
+				return nil
+			}
+
+			if raw := handleExecuteRawResp(value, data); raw != nil {
+				stringBuf.Data.WriteBytes(raw)
+				return nil
+			}
 			return fmt.Errorf("invalid value type '%s' for path %s, expecting string, got: %v. You can fix this by configuring this field as Int/Float/JSON Scalar", valueType, string(ctx.path()), string(value))
 		}
 		if !str.Nullable {

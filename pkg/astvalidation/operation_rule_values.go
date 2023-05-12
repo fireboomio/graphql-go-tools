@@ -400,7 +400,7 @@ func (v *valuesVisitor) valueSatisfiesScalarString(value ast.Value, definitionTy
 
 	if builtInStringScalar {
 		v.Report.AddExternalError(operationreport.ErrValueDoesntSatisfyString(printedValue, printedType, value.Position))
-	} else {
+	} else if !bytes.Contains(printedType, []byte("_Json")) {
 		v.Report.AddExternalError(operationreport.ErrValueDoesntSatisfyType(printedValue, printedType, value.Position))
 	}
 
