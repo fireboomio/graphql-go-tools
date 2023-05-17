@@ -144,3 +144,15 @@ type Literal []byte
 func (l Literal) Equals(another Literal) bool {
 	return bytes.Equal(l, another)
 }
+
+func CutBeforeSet(data []byte) (prefix []byte, ok bool) {
+	setIndex := bytes.LastIndex(data, []byte("{set: "))
+	if setIndex == -1 {
+		prefix = data
+		return
+	}
+
+	prefix = data[:setIndex]
+	ok = true
+	return
+}
