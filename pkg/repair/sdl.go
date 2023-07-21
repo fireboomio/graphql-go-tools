@@ -10,6 +10,7 @@ import (
 
 type OptionsSDL struct {
 	SetAllMutationFieldsNullable bool
+	Indent                       string
 }
 
 func SDL(input string, options OptionsSDL) (string, error) {
@@ -36,6 +37,11 @@ func (r *sdlRepair) do() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
+	if indent := r.options.Indent; indent != "" {
+		return astprinter.PrintStringIndent(r.doc, nil, indent)
+	}
+
 	return astprinter.PrintString(r.doc, nil)
 }
 
