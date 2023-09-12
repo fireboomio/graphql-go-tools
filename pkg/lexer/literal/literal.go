@@ -145,9 +145,15 @@ func (l Literal) Equals(another Literal) bool {
 	return bytes.Equal(l, another)
 }
 
-func CutBeforeSet(data []byte) (prefix []byte, ok bool) {
+func CutBeforeSet(data, after []byte) (prefix []byte, ok bool) {
+	afterIndex := bytes.LastIndex(data, after)
+	if afterIndex == -1 {
+		prefix = data
+		return
+	}
+
 	setIndex := bytes.LastIndex(data, []byte("{set: "))
-	if setIndex == -1 {
+	if setIndex == -1 || setIndex < afterIndex {
 		prefix = data
 		return
 	}

@@ -41,10 +41,11 @@ func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuf
 	undefinedVariables := make([]string, 0)
 
 	var offset bool
+	var staticData []byte
 	for j := range i.Segments {
 		switch i.Segments[j].SegmentType {
 		case StaticSegmentType:
-			staticData := i.Segments[j].Data
+			staticData = i.Segments[j].Data
 			if offset && len(staticData) > 1 {
 				offset = false
 				staticData = staticData[1:]
@@ -58,7 +59,7 @@ func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuf
 			case ObjectVariableKind:
 				err = i.renderObjectVariable(ctx, data, i.Segments[j], preparedInput)
 			case ContextVariableKind:
-				offset, err = i.renderContextVariable(ctx, i.Segments[j], preparedInput, &undefinedVariables)
+				offset, err = i.renderContextVariable(ctx, i.Segments[j], preparedInput, &undefinedVariables, staticData)
 			case HeaderVariableKind:
 				err = i.renderHeaderVariable(ctx, i.Segments[j].VariableSourcePath, preparedInput)
 			default:
@@ -103,12 +104,12 @@ func (i *InputTemplate) renderObjectVariable(ctx context.Context, variables []by
 	return segment.Renderer.RenderVariable(ctx, value, preparedInput)
 }
 
-func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegment, preparedInput *fastbuffer.FastBuffer, undefinedVariables *[]string) (bool, error) {
+func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegment, preparedInput *fastbuffer.FastBuffer, undefinedVariables *[]string, staticData []byte) (bool, error) {
 	value, valueType, offset, err := jsonparser.Get(ctx.Variables, segment.VariableSourcePath...)
 	if err != nil || valueType == jsonparser.Null {
 		if err == jsonparser.KeyPathNotFoundError {
 			*undefinedVariables = append(*undefinedVariables, segment.VariableSourcePath[0])
-			if before, ok := literal.CutBeforeSet(preparedInput.Bytes()); ok {
+			if before, ok := literal.CutBeforeSet(preparedInput.Bytes(), staticData); ok {
 				preparedInput.Reset()
 				preparedInput.WriteBytes(before)
 				preparedInput.WriteBytes(literal.NULL)
