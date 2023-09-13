@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -36,7 +37,7 @@ var (
 func Do(client *http.Client, ctx context.Context, requestInput []byte, out io.Writer) (err error) {
 
 	url, method, body, headers, queryParams := requestInputParams(requestInput)
-
+	body = SetUserValue(ctx, body)
 	request, err := http.NewRequestWithContext(ctx, string(method), string(url), bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -121,4 +122,17 @@ func respBodyReader(req *http.Request, resp *http.Response) (io.ReadCloser, erro
 	}
 
 	return resp.Body, nil
+}
+
+const (
+	UserFlag = "user"
+	wgKey    = "__wg"
+)
+
+func SetUserValue(ctx context.Context, input []byte) []byte {
+	if user := ctx.Value(UserFlag); user != nil {
+		userJson, _ := json.Marshal(user)
+		input, _ = jsonparser.Set(input, userJson, wgKey, UserFlag)
+	}
+	return input
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/buger/jsonparser"
 	log "github.com/jensneuse/abstractlogger"
 	"github.com/r3labs/sse/v2"
+	"github.com/wundergraph/graphql-go-tools/pkg/engine/datasource/httpclient"
 )
 
 var (
@@ -75,6 +76,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 	// with a goroutine that cancels the origin request if the downstream client disconnects
 	// in order to free resources after the initial handshake, we cancel the goroutine after we've received a response
 	originCtx, cancelOriginRequest := context.WithCancel(context.Background())
+	originCtx = context.WithValue(originCtx, httpclient.UserFlag, ctx.Value(httpclient.UserFlag))
 	defer cancelOriginRequest()
 	waitForResponse, cancelWaitForResponse := context.WithCancel(context.Background())
 	go func() {
@@ -295,6 +297,7 @@ func (h *gqlSSEConnectionHandler) buildPOSTRequest(ctx context.Context) (*http.R
 		return nil, err
 	}
 
+	body = httpclient.SetUserValue(ctx, body)
 	req, err := http.NewRequestWithContext(ctx, "POST", h.options.URL, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
