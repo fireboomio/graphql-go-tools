@@ -117,6 +117,13 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 			}
 		}
 
+		if len(segment.VariableSourcePath) == 1 && len(segment.VariableSourcePath[0]) == 1 {
+			// isVirtualParam
+			cutBytes := preparedInput.Bytes()[:preparedInput.Len()-1]
+			preparedInput.Reset()
+			preparedInput.WriteBytes(cutBytes)
+		}
+
 		preparedInput.WriteBytes(literal.NULL)
 		return false, nil
 	}
