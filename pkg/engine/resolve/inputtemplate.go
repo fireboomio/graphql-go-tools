@@ -117,7 +117,7 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 			}
 		}
 
-		if len(segment.VariableSourcePath) == 1 && len(segment.VariableSourcePath[0]) == 1 {
+		if valueType == jsonparser.Null && len(segment.VariableSourcePath[0]) == 1 {
 			// isVirtualParam
 			cutBytes := preparedInput.Bytes()[:preparedInput.Len()-1]
 			preparedInput.Reset()
