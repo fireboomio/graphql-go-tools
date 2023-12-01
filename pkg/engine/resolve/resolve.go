@@ -879,10 +879,10 @@ func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte) 
 	}
 	if export.IsListType {
 		dataValue, dataType, _, _ := jsonparser.Get(ctx.Variables, export.Path...)
-		var expectedIndex int
 		switch dataType {
 		case jsonparser.Array:
-			jsonparser.ArrayEach(dataValue, func([]byte, jsonparser.ValueType, int, error) {
+			var expectedIndex int
+			_, _ = jsonparser.ArrayEach(dataValue, func([]byte, jsonparser.ValueType, int, error) {
 				expectedIndex++
 			})
 			copyValue := make([]byte, len(dataValue)-1)
