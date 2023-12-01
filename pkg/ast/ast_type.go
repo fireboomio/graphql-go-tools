@@ -227,6 +227,11 @@ func (d *Document) ResolveTypeNameString(ref int) string {
 	return unsafebytes.BytesToString(d.ResolveTypeNameBytes(ref))
 }
 
+func (d *Document) IsListType(ref int) bool {
+	typeRef := d.ResolveListOrNameType(ref)
+	return d.Types[typeRef].TypeKind == TypeKindList
+}
+
 func (d *Document) ResolveUnderlyingType(ref int) (typeRef int) {
 	typeRef = ref
 	graphqlType := d.Types[ref]

@@ -877,6 +877,29 @@ func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte) 
 	if export.AsString {
 		value = append(literal.QUOTE, append(value, literal.QUOTE...)...)
 	}
+	if export.IsListType {
+		dataValue, dataType, _, _ := jsonparser.Get(ctx.Variables, export.Path...)
+		var expectedIndex int
+		switch dataType {
+		case jsonparser.Array:
+			jsonparser.ArrayEach(dataValue, func([]byte, jsonparser.ValueType, int, error) {
+				expectedIndex++
+			})
+			copyValue := make([]byte, len(dataValue)-1)
+			copy(copyValue, dataValue)
+			if expectedIndex > 0 {
+				copyValue = append(copyValue, literal.COMMA...)
+			}
+			dataValue = copyValue
+		case jsonparser.NotExist, jsonparser.Null:
+			dataValue = []byte("[")
+		default:
+			return
+		}
+
+		dataValue = append(dataValue, value...)
+		value = append(dataValue, literal.RBRACK...)
+	}
 	ctx.Variables, _ = jsonparser.Set(ctx.Variables, value, export.Path...)
 }
 
@@ -1490,8 +1513,9 @@ func (_ *BatchFetch) FetchKind() FetchKind {
 // FieldExport takes the value of the field during evaluation (rendering of the field)
 // and stores it in the variables using the Path as JSON pointer.
 type FieldExport struct {
-	Path     []string
-	AsString bool
+	Path       []string
+	AsString   bool
+	IsListType bool
 }
 
 type String struct {
