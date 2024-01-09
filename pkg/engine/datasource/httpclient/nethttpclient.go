@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/buger/jsonparser"
@@ -125,14 +126,25 @@ func respBodyReader(req *http.Request, resp *http.Response) (io.ReadCloser, erro
 }
 
 const (
-	UserFlag = "user"
-	wgKey    = "__wg"
+	wgKey            = "__wg"
+	clientRequestkey = "clientRequest"
+	headersKey       = "headers"
+	UserFlag         = "user"
+	ClientRequestKey = "__wg_clientRequest"
 )
 
 func SetUserValue(ctx context.Context, input []byte) []byte {
 	if user := ctx.Value(UserFlag); user != nil {
 		userJson, _ := json.Marshal(user)
 		input, _ = jsonparser.Set(input, userJson, wgKey, UserFlag)
+	}
+	if clientRequest, ok := ctx.Value(ClientRequestKey).(*http.Request); ok {
+		headers := make(map[string]string)
+		for k, v := range clientRequest.Header {
+			headers[k] = strings.Join(v, ",")
+		}
+		headersJson, _ := json.Marshal(headers)
+		input, _ = jsonparser.Set(input, headersJson, wgKey, clientRequestkey, headersKey)
 	}
 	return input
 }

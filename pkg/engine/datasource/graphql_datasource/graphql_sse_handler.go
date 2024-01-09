@@ -77,6 +77,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 	// in order to free resources after the initial handshake, we cancel the goroutine after we've received a response
 	originCtx, cancelOriginRequest := context.WithCancel(context.Background())
 	originCtx = context.WithValue(originCtx, httpclient.UserFlag, ctx.Value(httpclient.UserFlag))
+	originCtx = context.WithValue(originCtx, httpclient.ClientRequestKey, ctx.Value(httpclient.ClientRequestKey))
 	defer cancelOriginRequest()
 	waitForResponse, cancelWaitForResponse := context.WithCancel(context.Background())
 	go func() {
