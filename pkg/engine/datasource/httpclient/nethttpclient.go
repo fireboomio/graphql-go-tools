@@ -6,6 +6,8 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/ext"
 	"io"
 	"net/http"
 	"strings"
@@ -94,7 +96,15 @@ func Do(client *http.Client, ctx context.Context, requestInput []byte, out io.Wr
 
 	request.Header.Add("accept", "application/json")
 	request.Header.Add("content-type", "application/json")
-
+	if traceFunc, ok := TraceRequestFuncFromContext(ctx); ok {
+		var callback func(...func(opentracing.Span))
+		request, callback = traceFunc(request)
+		defer callback(func(span opentracing.Span) {
+			if err != nil {
+				ext.LogError(span, err)
+			}
+		})
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -126,11 +136,12 @@ func respBodyReader(req *http.Request, resp *http.Response) (io.ReadCloser, erro
 }
 
 const (
-	wgKey            = "__wg"
-	clientRequestkey = "clientRequest"
-	headersKey       = "headers"
-	UserFlag         = "user"
-	ClientRequestKey = "__wg_clientRequest"
+	wgKey               = "__wg"
+	clientRequestkey    = "clientRequest"
+	headersKey          = "headers"
+	UserFlag            = "user"
+	ClientRequestKey    = "__wg_clientRequest"
+	TraceRequestFuncKey = "traceRequestFunc"
 )
 
 func SetUserValue(ctx context.Context, input []byte) []byte {
@@ -147,4 +158,11 @@ func SetUserValue(ctx context.Context, input []byte) []byte {
 		input, _ = jsonparser.Set(input, headersJson, wgKey, clientRequestkey, headersKey)
 	}
 	return input
+}
+
+type TraceRequestFunc func(*http.Request, ...func(span opentracing.Span)) (*http.Request, func(...func(opentracing.Span)))
+
+func TraceRequestFuncFromContext(ctx context.Context) (TraceRequestFunc, bool) {
+	traceFunc, ok := ctx.Value(TraceRequestFuncKey).(TraceRequestFunc)
+	return traceFunc, ok
 }

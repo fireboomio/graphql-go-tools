@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/ext"
 	"io"
 	"math"
 	"net/http"
@@ -78,6 +80,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 	originCtx, cancelOriginRequest := context.WithCancel(context.Background())
 	originCtx = context.WithValue(originCtx, httpclient.UserFlag, ctx.Value(httpclient.UserFlag))
 	originCtx = context.WithValue(originCtx, httpclient.ClientRequestKey, ctx.Value(httpclient.ClientRequestKey))
+	originCtx = context.WithValue(originCtx, httpclient.TraceRequestFuncKey, ctx.Value(httpclient.TraceRequestFuncKey))
 	defer cancelOriginRequest()
 	waitForResponse, cancelWaitForResponse := context.WithCancel(context.Background())
 	go func() {
@@ -236,11 +239,19 @@ func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context
 	} else {
 		req, err = h.buildGETRequest(ctx)
 	}
-
 	if err != nil {
 		return nil, err
 	}
 
+	if traceFunc, ok := httpclient.TraceRequestFuncFromContext(ctx); ok {
+		var callback func(...func(opentracing.Span))
+		req, callback = traceFunc(req)
+		defer callback(func(span opentracing.Span) {
+			if err != nil {
+				ext.LogError(span, err)
+			}
+		})
+	}
 	resp, err := h.conn.Do(req)
 	if err != nil {
 		return nil, err
@@ -250,7 +261,8 @@ func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context
 	case http.StatusOK:
 		return resp, nil
 	default:
-		return nil, fmt.Errorf("failed to connect to stream unexpected resp status code: %d", resp.StatusCode)
+		err = fmt.Errorf("failed to connect to stream unexpected resp status code: %d", resp.StatusCode)
+		return nil, err
 	}
 }
 
