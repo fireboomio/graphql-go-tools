@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/opentracing/opentracing-go"
 	"github.com/opentracing/opentracing-go/ext"
@@ -92,12 +93,13 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 			// end the goroutine to free resources
 		}
 	}()
-	resp, err := h.performSubscriptionRequest(originCtx)
+	resp, callback, err := h.performSubscriptionRequest(originCtx)
 	// cancel the goroutine to free resources
 	// the originRequest will be canceled through defer cancelOriginRequest()
 	// as we check on every iteration (below) if the downstream ctx is done
 	cancelWaitForResponse()
 	if err != nil {
+		callback(func(span opentracing.Span) { ext.LogError(span, err) })
 		h.log.Error("failed to perform subscription request", log.Error(err))
 
 		if ctx.Err() != nil {
@@ -113,6 +115,22 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 		_ = resp.Body.Close()
 	}()
 
+	spanExt := []func(opentracing.Span){func(span opentracing.Span) {
+		ext.HTTPStatusCode.Set(span, uint16(resp.StatusCode))
+	}}
+	go func() {
+		defer callback(spanExt...)
+		for {
+			select {
+			case <-dataCh:
+			case errBytes := <-errCh:
+				spanExt = append(spanExt, func(span opentracing.Span) { ext.LogError(span, errors.New(string(errBytes))) })
+				return
+			default:
+				return
+			}
+		}
+	}()
 	reader := sse.NewEventStreamReader(resp.Body, math.MaxInt)
 
 	for {
@@ -228,10 +246,11 @@ func trim(data []byte) []byte {
 	return data
 }
 
-func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context) (*http.Response, error) {
+func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context) (*http.Response, func(...func(opentracing.Span)), error) {
 
 	var req *http.Request
 	var err error
+	callback := func(...func(opentracing.Span)) {}
 
 	// default to GET requests when SSEMethodPost is not enabled in the SubscriptionConfiguration
 	if h.options.SSEMethodPost {
@@ -240,29 +259,23 @@ func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context
 		req, err = h.buildGETRequest(ctx)
 	}
 	if err != nil {
-		return nil, err
+		return nil, callback, err
 	}
 
 	if traceFunc, ok := httpclient.TraceRequestFuncFromContext(ctx); ok {
-		var callback func(...func(opentracing.Span))
 		req, callback = traceFunc(req)
-		defer callback(func(span opentracing.Span) {
-			if err != nil {
-				ext.LogError(span, err)
-			}
-		})
 	}
 	resp, err := h.conn.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, callback, err
 	}
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return resp, nil
+		return resp, callback, nil
 	default:
 		err = fmt.Errorf("failed to connect to stream unexpected resp status code: %d", resp.StatusCode)
-		return nil, err
+		return nil, callback, err
 	}
 }
 
