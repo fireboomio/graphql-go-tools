@@ -81,7 +81,8 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 	originCtx, cancelOriginRequest := context.WithCancel(context.Background())
 	originCtx = context.WithValue(originCtx, httpclient.UserFlag, ctx.Value(httpclient.UserFlag))
 	originCtx = context.WithValue(originCtx, httpclient.ClientRequestKey, ctx.Value(httpclient.ClientRequestKey))
-	originCtx = context.WithValue(originCtx, httpclient.TraceRequestFuncKey, ctx.Value(httpclient.TraceRequestFuncKey))
+	originCtx = context.WithValue(originCtx, httpclient.StartTraceRequestKey, ctx.Value(httpclient.StartTraceRequestKey))
+	originCtx = context.WithValue(originCtx, httpclient.SpanWithLogResponseKey, ctx.Value(httpclient.SpanWithLogResponseKey))
 	defer cancelOriginRequest()
 	waitForResponse, cancelWaitForResponse := context.WithCancel(context.Background())
 	go func() {
@@ -94,34 +95,38 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 		}
 	}()
 	resp, callback, err := h.performSubscriptionRequest(originCtx)
+	var spanFuncs []func(opentracing.Span)
+	defer func() {
+		callback(append(spanFuncs, func(span opentracing.Span) {
+			if err != nil {
+				ext.LogError(span, err)
+			}
+		})...)
+	}()
+	if spanFunc, ok := httpclient.SpanWithLogResponseFromContext(ctx); ok {
+		spanFuncs = append(spanFuncs, spanFunc(resp))
+	}
 	// cancel the goroutine to free resources
 	// the originRequest will be canceled through defer cancelOriginRequest()
 	// as we check on every iteration (below) if the downstream ctx is done
 	cancelWaitForResponse()
 	if err != nil {
-		callback(resp, func(span opentracing.Span) { ext.LogError(span, err) })
 		h.log.Error("failed to perform subscription request", log.Error(err))
-
 		if ctx.Err() != nil {
 			// request context was canceled do not send an error as channel will be closed
 			return
 		}
 
 		sub.next <- []byte(internalError)
-
 		return
 	}
 
-	spanFuncs := []func(opentracing.Span){func(span opentracing.Span) {
-		ext.HTTPStatusCode.Set(span, uint16(resp.StatusCode))
-	}}
 	var errorBytes []byte
 	defer func() {
-		if errorBytes != nil {
+		_ = resp.Body.Close()
+		if len(errorBytes) > 0 {
 			spanFuncs = append(spanFuncs, func(span opentracing.Span) { ext.LogError(span, errors.New(string(errorBytes))) })
 		}
-		callback(resp, spanFuncs...)
-		_ = resp.Body.Close()
 	}()
 	reader := sse.NewEventStreamReader(resp.Body, math.MaxInt)
 
@@ -239,11 +244,11 @@ func trim(data []byte) []byte {
 	return data
 }
 
-func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context) (*http.Response, func(*http.Response, ...func(opentracing.Span)), error) {
+func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context) (*http.Response, httpclient.StartTraceRequestCallback, error) {
 
 	var req *http.Request
 	var err error
-	callback := func(*http.Response, ...func(opentracing.Span)) {}
+	callback := httpclient.EmptyStartTraceRequestCallback
 
 	// default to GET requests when SSEMethodPost is not enabled in the SubscriptionConfiguration
 	if h.options.SSEMethodPost {
@@ -255,7 +260,7 @@ func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context
 		return nil, callback, err
 	}
 
-	if traceFunc, ok := httpclient.TraceRequestFuncFromContext(ctx); ok {
+	if traceFunc, ok := httpclient.StartTraceRequestFromContext(ctx); ok {
 		req, callback = traceFunc(req)
 	}
 	resp, err := h.conn.Do(req)

@@ -96,24 +96,25 @@ func Do(client *http.Client, ctx context.Context, requestInput []byte, out io.Wr
 
 	request.Header.Add("accept", "application/json")
 	request.Header.Add("content-type", "application/json")
-	var callback func(*http.Response, ...func(opentracing.Span))
-	if traceFunc, ok := TraceRequestFuncFromContext(ctx); ok {
+	var spanFuncs []func(opentracing.Span)
+	if traceFunc, ok := StartTraceRequestFromContext(ctx); ok {
+		var callback StartTraceRequestCallback
 		request, callback = traceFunc(request)
+		defer callback(append(spanFuncs, func(span opentracing.Span) {
+			if err != nil {
+				ext.LogError(span, err)
+			}
+		})...)
 	}
+
 	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if callback != nil {
-			callback(response, func(span opentracing.Span) {
-				if err != nil {
-					ext.LogError(span, err)
-				}
-			})
-		}
-		response.Body.Close()
-	}()
+	if spanFunc, ok := SpanWithLogResponseFromContext(ctx); ok {
+		spanFuncs = append(spanFuncs, spanFunc(response))
+	}
+	defer func() { _ = response.Body.Close() }()
 
 	respReader, err := respBodyReader(request, response)
 	if err != nil {
@@ -140,12 +141,13 @@ func respBodyReader(req *http.Request, resp *http.Response) (io.ReadCloser, erro
 }
 
 const (
-	wgKey               = "__wg"
-	clientRequestkey    = "clientRequest"
-	headersKey          = "headers"
-	UserFlag            = "user"
-	ClientRequestKey    = "__wg_clientRequest"
-	TraceRequestFuncKey = "traceRequestFunc"
+	wgKey                  = "__wg"
+	clientRequestkey       = "clientRequest"
+	headersKey             = "headers"
+	UserFlag               = "user"
+	ClientRequestKey       = "__wg_clientRequest"
+	StartTraceRequestKey   = "StartTraceRequest"
+	SpanWithLogResponseKey = "SpanWithLogResponse"
 )
 
 func SetUserValue(ctx context.Context, input []byte) []byte {
@@ -164,9 +166,20 @@ func SetUserValue(ctx context.Context, input []byte) []byte {
 	return input
 }
 
-type TraceRequestFunc = func(*http.Request, ...func(span opentracing.Span)) (*http.Request, func(*http.Response, ...func(opentracing.Span)))
+type (
+	StartTraceRequestCallback = func(...func(opentracing.Span))
+	StartTraceRequest         = func(*http.Request, ...func(span opentracing.Span)) (*http.Request, StartTraceRequestCallback)
+	SpanWithLogResponse       = func(*http.Response) func(opentracing.Span)
+)
 
-func TraceRequestFuncFromContext(ctx context.Context) (TraceRequestFunc, bool) {
-	traceFunc, ok := ctx.Value(TraceRequestFuncKey).(TraceRequestFunc)
+var EmptyStartTraceRequestCallback = func(...func(opentracing.Span)) {}
+
+func StartTraceRequestFromContext(ctx context.Context) (StartTraceRequest, bool) {
+	traceFunc, ok := ctx.Value(SpanWithLogResponseKey).(StartTraceRequest)
 	return traceFunc, ok
+}
+
+func SpanWithLogResponseFromContext(ctx context.Context) (SpanWithLogResponse, bool) {
+	spanFunc, ok := ctx.Value(StartTraceRequestKey).(SpanWithLogResponse)
+	return spanFunc, ok
 }
