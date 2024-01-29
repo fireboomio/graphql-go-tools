@@ -100,11 +100,13 @@ func Do(client *http.Client, ctx context.Context, requestInput []byte, out io.Wr
 	if traceFunc, ok := StartTraceRequestFromContext(ctx); ok {
 		var callback StartTraceRequestCallback
 		request, callback = traceFunc(request)
-		defer callback(append(spanFuncs, func(span opentracing.Span) {
-			if err != nil {
-				ext.LogError(span, err)
-			}
-		})...)
+		defer func() {
+			callback(append(spanFuncs, func(span opentracing.Span) {
+				if err != nil {
+					ext.LogError(span, err)
+				}
+			})...)
+		}()
 	}
 
 	response, err := client.Do(request)
