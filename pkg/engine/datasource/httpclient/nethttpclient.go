@@ -96,20 +96,24 @@ func Do(client *http.Client, ctx context.Context, requestInput []byte, out io.Wr
 
 	request.Header.Add("accept", "application/json")
 	request.Header.Add("content-type", "application/json")
+	var callback func(*http.Response, ...func(opentracing.Span))
 	if traceFunc, ok := TraceRequestFuncFromContext(ctx); ok {
-		var callback func(...func(opentracing.Span))
 		request, callback = traceFunc(request)
-		defer callback(func(span opentracing.Span) {
-			if err != nil {
-				ext.LogError(span, err)
-			}
-		})
 	}
 	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		if callback != nil {
+			callback(response, func(span opentracing.Span) {
+				if err != nil {
+					ext.LogError(span, err)
+				}
+			})
+		}
+		response.Body.Close()
+	}()
 
 	respReader, err := respBodyReader(request, response)
 	if err != nil {
@@ -160,7 +164,7 @@ func SetUserValue(ctx context.Context, input []byte) []byte {
 	return input
 }
 
-type TraceRequestFunc func(*http.Request, ...func(span opentracing.Span)) (*http.Request, func(...func(opentracing.Span)))
+type TraceRequestFunc = func(*http.Request, ...func(span opentracing.Span)) (*http.Request, func(*http.Response, ...func(opentracing.Span)))
 
 func TraceRequestFuncFromContext(ctx context.Context) (TraceRequestFunc, bool) {
 	traceFunc, ok := ctx.Value(TraceRequestFuncKey).(TraceRequestFunc)

@@ -99,7 +99,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 	// as we check on every iteration (below) if the downstream ctx is done
 	cancelWaitForResponse()
 	if err != nil {
-		callback(func(span opentracing.Span) { ext.LogError(span, err) })
+		callback(resp, func(span opentracing.Span) { ext.LogError(span, err) })
 		h.log.Error("failed to perform subscription request", log.Error(err))
 
 		if ctx.Err() != nil {
@@ -111,25 +111,17 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 
 		return
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
 
-	spanExt := []func(opentracing.Span){func(span opentracing.Span) {
+	spanFuncs := []func(opentracing.Span){func(span opentracing.Span) {
 		ext.HTTPStatusCode.Set(span, uint16(resp.StatusCode))
 	}}
-	go func() {
-		defer callback(spanExt...)
-		for {
-			select {
-			case <-dataCh:
-			case errBytes := <-errCh:
-				spanExt = append(spanExt, func(span opentracing.Span) { ext.LogError(span, errors.New(string(errBytes))) })
-				return
-			default:
-				return
-			}
+	var errorBytes []byte
+	defer func() {
+		if errorBytes != nil {
+			spanFuncs = append(spanFuncs, func(span opentracing.Span) { ext.LogError(span, errors.New(string(errorBytes))) })
 		}
+		callback(resp, spanFuncs...)
+		_ = resp.Body.Close()
 	}()
 	reader := sse.NewEventStreamReader(resp.Body, math.MaxInt)
 
@@ -146,7 +138,6 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 			}
 
 			h.log.Error("failed to read event", log.Error(err))
-
 			errCh <- []byte(internalError)
 			return
 		}
@@ -210,6 +201,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 							return
 						}
 
+						errorBytes = response
 						errCh <- response
 						return
 					} else if valueType == jsonparser.Object {
@@ -222,6 +214,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 							return
 						}
 
+						errorBytes = response
 						errCh <- response
 						return
 					}
@@ -246,11 +239,11 @@ func trim(data []byte) []byte {
 	return data
 }
 
-func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context) (*http.Response, func(...func(opentracing.Span)), error) {
+func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context) (*http.Response, func(*http.Response, ...func(opentracing.Span)), error) {
 
 	var req *http.Request
 	var err error
-	callback := func(...func(opentracing.Span)) {}
+	callback := func(*http.Response, ...func(opentracing.Span)) {}
 
 	// default to GET requests when SSEMethodPost is not enabled in the SubscriptionConfiguration
 	if h.options.SSEMethodPost {
