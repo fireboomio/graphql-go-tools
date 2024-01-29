@@ -175,11 +175,11 @@ type (
 var EmptyStartTraceRequestCallback = func(...func(opentracing.Span)) {}
 
 func StartTraceRequestFromContext(ctx context.Context) (StartTraceRequest, bool) {
-	traceFunc, ok := ctx.Value(SpanWithLogResponseKey).(StartTraceRequest)
+	traceFunc, ok := ctx.Value(StartTraceRequestKey).(StartTraceRequest)
 	return traceFunc, ok
 }
 
 func SpanWithLogResponseFromContext(ctx context.Context) (SpanWithLogResponse, bool) {
-	spanFunc, ok := ctx.Value(StartTraceRequestKey).(SpanWithLogResponse)
+	spanFunc, ok := ctx.Value(SpanWithLogResponseKey).(SpanWithLogResponse)
 	return spanFunc, ok
 }
