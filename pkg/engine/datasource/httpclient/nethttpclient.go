@@ -143,19 +143,23 @@ func respBodyReader(req *http.Request, resp *http.Response) (io.ReadCloser, erro
 }
 
 const (
-	wgKey                  = "__wg"
-	clientRequestkey       = "clientRequest"
-	headersKey             = "headers"
-	UserFlag               = "user"
-	ClientRequestKey       = "__wg_clientRequest"
+	wgKey            = "__wg"
+	UserKey          = "user"
+	ClientRequestKey = "__wg_clientRequest"
+
 	StartTraceRequestKey   = "StartTraceRequest"
 	SpanWithLogResponseKey = "SpanWithLogResponse"
 )
 
+var (
+	wgUserKey                 = []string{wgKey, UserKey}
+	wgClientRequestHeadersKey = []string{wgKey, "clientRequest", "headers"}
+)
+
 func SetUserValue(ctx context.Context, input []byte) []byte {
-	if user := ctx.Value(UserFlag); user != nil {
+	if user := ctx.Value(UserKey); user != nil {
 		userJson, _ := json.Marshal(user)
-		input, _ = jsonparser.Set(input, userJson, wgKey, UserFlag)
+		input, _ = jsonparser.Set(input, userJson, wgUserKey...)
 	}
 	if clientRequest, ok := ctx.Value(ClientRequestKey).(*http.Request); ok {
 		headers := make(map[string]string)
@@ -163,7 +167,7 @@ func SetUserValue(ctx context.Context, input []byte) []byte {
 			headers[k] = strings.Join(v, ",")
 		}
 		headersJson, _ := json.Marshal(headers)
-		input, _ = jsonparser.Set(input, headersJson, wgKey, clientRequestkey, headersKey)
+		input, _ = jsonparser.Set(input, headersJson, wgClientRequestHeadersKey...)
 	}
 	return input
 }
