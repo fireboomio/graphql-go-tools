@@ -246,6 +246,7 @@ func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx, clientCtx cont
 	var err error
 	callback := httpclient.EmptyStartTraceRequestCallback
 
+	ctx = httpclient.CopyContextValueFromContext(ctx, clientCtx)
 	// default to GET requests when SSEMethodPost is not enabled in the SubscriptionConfiguration
 	if h.options.SSEMethodPost {
 		req, err = h.buildPOSTRequest(ctx, clientCtx)

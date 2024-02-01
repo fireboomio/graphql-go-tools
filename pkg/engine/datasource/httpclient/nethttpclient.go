@@ -147,8 +147,9 @@ const (
 	UserKey          = "user"
 	ClientRequestKey = "__wg_clientRequest"
 
-	StartTraceRequestKey   = "StartTraceRequest"
-	SpanWithLogResponseKey = "SpanWithLogResponse"
+	startTraceRequestKey   = "StartTraceRequest"
+	spanWithLogResponseKey = "SpanWithLogResponse"
+	copyContextValueKey    = "CopyContextValue"
 )
 
 var (
@@ -176,16 +177,24 @@ type (
 	StartTraceRequestCallback = func(...func(opentracing.Span))
 	StartTraceRequest         = func(*http.Request, ...func(span opentracing.Span)) (*http.Request, StartTraceRequestCallback)
 	SpanWithLogResponse       = func(*http.Response) func(opentracing.Span)
+	CopyContextValue          = func(_, _ context.Context) context.Context
 )
 
 var EmptyStartTraceRequestCallback = func(...func(opentracing.Span)) {}
 
 func StartTraceRequestFromContext(ctx context.Context) (StartTraceRequest, bool) {
-	traceFunc, ok := ctx.Value(StartTraceRequestKey).(StartTraceRequest)
+	traceFunc, ok := ctx.Value(startTraceRequestKey).(StartTraceRequest)
 	return traceFunc, ok
 }
 
 func SpanWithLogResponseFromContext(ctx context.Context) (SpanWithLogResponse, bool) {
-	spanFunc, ok := ctx.Value(SpanWithLogResponseKey).(SpanWithLogResponse)
+	spanFunc, ok := ctx.Value(spanWithLogResponseKey).(SpanWithLogResponse)
 	return spanFunc, ok
+}
+
+func CopyContextValueFromContext(target, origin context.Context) context.Context {
+	if copyFunc, ok := origin.Value(copyContextValueKey).(CopyContextValue); ok {
+		target = copyFunc(target, origin)
+	}
+	return target
 }
