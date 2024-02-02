@@ -96,7 +96,13 @@ func Do(client *http.Client, ctx context.Context, requestInput []byte, out io.Wr
 
 	request.Header.Add("accept", "application/json")
 	request.Header.Add("content-type", "application/json")
-	var spanFuncs []func(opentracing.Span)
+	var (
+		spanFuncs   []func(opentracing.Span)
+		spanLogResp SpanWithLogResponse
+	)
+	if spanFunc, ok := SpanWithLogResponseFromContext(ctx); ok {
+		spanLogResp = spanFunc
+	}
 	if traceFunc, ok := StartTraceRequestFromContext(ctx); ok {
 		var callback StartTraceRequestCallback
 		request, callback = traceFunc(request)
@@ -113,8 +119,8 @@ func Do(client *http.Client, ctx context.Context, requestInput []byte, out io.Wr
 	if err != nil {
 		return err
 	}
-	if spanFunc, ok := SpanWithLogResponseFromContext(ctx); ok {
-		spanFuncs = append(spanFuncs, spanFunc(response))
+	if spanLogResp != nil {
+		spanFuncs = append(spanFuncs, spanLogResp(response))
 	}
 	defer func() { _ = response.Body.Close() }()
 

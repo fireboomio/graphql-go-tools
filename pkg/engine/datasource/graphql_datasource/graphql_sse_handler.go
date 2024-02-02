@@ -90,8 +90,14 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 			// end the goroutine to free resources
 		}
 	}()
+	var (
+		spanFuncs   []func(opentracing.Span)
+		spanLogResp httpclient.SpanWithLogResponse
+	)
+	if spanFunc, ok := httpclient.SpanWithLogResponseFromContext(ctx); ok {
+		spanLogResp = spanFunc
+	}
 	resp, callback, err := h.performSubscriptionRequest(originCtx, ctx)
-	var spanFuncs []func(opentracing.Span)
 	defer func() {
 		callback(append(spanFuncs, func(span opentracing.Span) {
 			if err != nil {
@@ -99,8 +105,8 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 			}
 		})...)
 	}()
-	if spanFunc, ok := httpclient.SpanWithLogResponseFromContext(ctx); ok {
-		spanFuncs = append(spanFuncs, spanFunc(resp))
+	if spanLogResp != nil {
+		spanFuncs = append(spanFuncs, spanLogResp(resp))
 	}
 	// cancel the goroutine to free resources
 	// the originRequest will be canceled through defer cancelOriginRequest()
