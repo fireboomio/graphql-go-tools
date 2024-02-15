@@ -553,7 +553,7 @@ func (r *Resolver) ResolveGraphQLSubscription(ctx *Context, subscription *GraphQ
 	for {
 		select {
 		case <-resolverDone:
-			return nil
+			return writeAndFlush(writer, []byte(`{"cancel":true}`))
 		default:
 			data, ok := <-next
 			if !ok {
