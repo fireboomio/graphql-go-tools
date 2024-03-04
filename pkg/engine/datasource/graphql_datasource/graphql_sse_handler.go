@@ -78,7 +78,7 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 	// to solve the issue, we use a separate context for the origin request
 	// with a goroutine that cancels the origin request if the downstream client disconnects
 	// in order to free resources after the initial handshake, we cancel the goroutine after we've received a response
-	originCtx, cancelOriginRequest := context.WithCancel(context.Background())
+	originCtx, cancelOriginRequest := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelOriginRequest()
 	waitForResponse, cancelWaitForResponse := context.WithCancel(context.Background())
 	go func() {
@@ -94,10 +94,10 @@ func (h *gqlSSEConnectionHandler) subscribe(ctx context.Context, sub Subscriptio
 		spanFuncs   []func(opentracing.Span)
 		spanLogResp httpclient.SpanWithLogResponse
 	)
-	if spanFunc, ok := httpclient.SpanWithLogResponseFromContext(ctx); ok {
+	if spanFunc, ok := httpclient.SpanWithLogResponseFromContext(originCtx); ok {
 		spanLogResp = spanFunc
 	}
-	resp, callback, err := h.performSubscriptionRequest(originCtx, ctx)
+	resp, callback, err := h.performSubscriptionRequest(originCtx)
 	defer func() {
 		callback(append(spanFuncs, func(span opentracing.Span) {
 			if err != nil {
@@ -246,16 +246,15 @@ func trim(data []byte) []byte {
 	return data
 }
 
-func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx, clientCtx context.Context) (*http.Response, httpclient.StartTraceRequestCallback, error) {
+func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx context.Context) (*http.Response, httpclient.StartTraceRequestCallback, error) {
 
 	var req *http.Request
 	var err error
 	callback := httpclient.EmptyStartTraceRequestCallback
 
-	ctx = httpclient.CopyContextValueFromContext(ctx, clientCtx)
 	// default to GET requests when SSEMethodPost is not enabled in the SubscriptionConfiguration
 	if h.options.SSEMethodPost {
-		req, err = h.buildPOSTRequest(ctx, clientCtx)
+		req, err = h.buildPOSTRequest(ctx)
 	} else {
 		req, err = h.buildGETRequest(ctx)
 	}
@@ -263,7 +262,7 @@ func (h *gqlSSEConnectionHandler) performSubscriptionRequest(ctx, clientCtx cont
 		return nil, callback, err
 	}
 
-	if traceFunc, ok := httpclient.StartTraceRequestFromContext(clientCtx); ok {
+	if traceFunc, ok := httpclient.StartTraceRequestFromContext(ctx); ok {
 		req, callback = traceFunc(req)
 	}
 	resp, err := h.conn.Do(req)
@@ -318,13 +317,13 @@ func (h *gqlSSEConnectionHandler) buildGETRequest(ctx context.Context) (*http.Re
 	return req, nil
 }
 
-func (h *gqlSSEConnectionHandler) buildPOSTRequest(ctx, clientCtx context.Context) (*http.Request, error) {
+func (h *gqlSSEConnectionHandler) buildPOSTRequest(ctx context.Context) (*http.Request, error) {
 	body, err := json.Marshal(h.options.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	body = httpclient.SetUserValue(clientCtx, body)
+	body = httpclient.SetUserValue(ctx, body)
 	req, err := http.NewRequestWithContext(ctx, "POST", h.options.URL, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
