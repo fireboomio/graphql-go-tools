@@ -1133,6 +1133,28 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
+	skipBufferIds := make(map[int]bool)
+	for i := range object.Fields {
+		if object.Fields[i].SkipDirectiveDefined {
+			skip, err := jsonparser.GetBoolean(ctx.Variables, object.Fields[i].SkipVariableName)
+			if err == nil && skip {
+				skipBufferIds[object.Fields[i].BufferID] = true
+			}
+			continue
+		}
+
+		if object.Fields[i].IncludeDirectiveDefined {
+			include, err := jsonparser.GetBoolean(ctx.Variables, object.Fields[i].IncludeVariableName)
+			if err != nil || !include {
+				skipBufferIds[object.Fields[i].BufferID] = true
+			}
+			continue
+		}
+	}
+	if len(skipBufferIds) > 0 {
+		ctx.Context = context.WithValue(ctx.Context, "skipBufferIds", skipBufferIds)
+	}
+
 	var set *resultSet
 	if object.Fetch != nil {
 		set = r.getResultSet()
@@ -1156,21 +1178,9 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	first := true
 	skipCount := 0
 	for i := range object.Fields {
-
-		if object.Fields[i].SkipDirectiveDefined {
-			skip, err := jsonparser.GetBoolean(ctx.Variables, object.Fields[i].SkipVariableName)
-			if err == nil && skip {
-				skipCount++
-				continue
-			}
-		}
-
-		if object.Fields[i].IncludeDirectiveDefined {
-			include, err := jsonparser.GetBoolean(ctx.Variables, object.Fields[i].IncludeVariableName)
-			if err != nil || !include {
-				skipCount++
-				continue
-			}
+		if _, ok := skipBufferIds[object.Fields[i].BufferID]; ok {
+			skipCount++
+			continue
 		}
 
 		var fieldData []byte

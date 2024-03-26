@@ -48,6 +48,12 @@ func NewFetcher(enableSingleFlightLoader bool) *Fetcher {
 }
 
 func (f *Fetcher) Fetch(ctx *Context, fetch *SingleFetch, preparedInput *fastbuffer.FastBuffer, buf *BufPair) (err error) {
+	if skipBufferIds, ok := ctx.Context.Value("skipBufferIds").(map[int]bool); ok {
+		if _, ok = skipBufferIds[fetch.BufferId]; ok {
+			return
+		}
+	}
+
 	dataBuf := pool.BytesBuffer.Get()
 	defer pool.BytesBuffer.Put(dataBuf)
 
