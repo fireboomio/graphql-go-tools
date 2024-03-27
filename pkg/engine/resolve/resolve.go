@@ -1151,14 +1151,14 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			continue
 		}
 	}
-	if len(skipBufferIds) > 0 {
-		ctx.Context = context.WithValue(ctx.Context, "skipBufferIds", skipBufferIds)
-	}
 
 	var set *resultSet
 	if object.Fetch != nil {
 		set = r.getResultSet()
 		defer r.freeResultSet(set)
+		for bufId := range skipBufferIds {
+			set.buffers[bufId] = nil
+		}
 		err = r.resolveFetch(ctx, object.Fetch, data, set)
 		if err != nil {
 			return
@@ -1309,20 +1309,21 @@ func (r *Resolver) resolveFetch(ctx *Context, fetch Fetch, data []byte, set *res
 		return nil
 	}
 
+	var skipFetch bool
 	switch f := fetch.(type) {
 	case *SingleFetch:
 		preparedInput := r.getBufPair()
 		defer r.freeBufPair(preparedInput)
-		err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data)
-		if err != nil {
+		skipFetch, err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data)
+		if err != nil || skipFetch {
 			return err
 		}
 		err = r.resolveSingleFetch(ctx, f, preparedInput.Data, set.buffers[f.BufferId])
 	case *BatchFetch:
 		preparedInput := r.getBufPair()
 		defer r.freeBufPair(preparedInput)
-		err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data)
-		if err != nil {
+		skipFetch, err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data)
+		if err != nil || skipFetch {
 			return err
 		}
 		err = r.resolveBatchFetch(ctx, f, preparedInput.Data, set.buffers[f.Fetch.BufferId])
@@ -1343,25 +1344,36 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 
 	for i := range fetch.Fetches {
 		wg.Add(1)
+		var skipFetch bool
 		switch f := fetch.Fetches[i].(type) {
 		case *SingleFetch:
 			preparedInput := r.getBufPair()
-			err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data)
+			*preparedInputs = append(*preparedInputs, preparedInput)
+			skipFetch, err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data)
 			if err != nil {
 				return err
 			}
-			*preparedInputs = append(*preparedInputs, preparedInput)
+			if skipFetch {
+				wg.Done()
+				continue
+			}
+
 			buf := set.buffers[f.BufferId]
 			resolvers = append(resolvers, func() error {
 				return r.resolveSingleFetch(ctx, f, preparedInput.Data, buf)
 			})
 		case *BatchFetch:
 			preparedInput := r.getBufPair()
-			err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data)
+			*preparedInputs = append(*preparedInputs, preparedInput)
+			skipFetch, err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data)
 			if err != nil {
 				return err
 			}
-			*preparedInputs = append(*preparedInputs, preparedInput)
+			if skipFetch {
+				wg.Done()
+				continue
+			}
+
 			buf := set.buffers[f.Fetch.BufferId]
 			resolvers = append(resolvers, func() error {
 				return r.resolveBatchFetch(ctx, f, preparedInput.Data, buf)
@@ -1381,7 +1393,11 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	return
 }
 
-func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (err error) {
+func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (skip bool, err error) {
+	if _, skip = set.buffers[fetch.BufferId]; skip {
+		delete(set.buffers, fetch.BufferId)
+		return
+	}
 	err = fetch.InputTemplate.Render(ctx, data, preparedInput)
 	buf := r.getBufPair()
 	set.buffers[fetch.BufferId] = buf
