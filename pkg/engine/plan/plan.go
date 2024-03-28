@@ -803,21 +803,17 @@ func (v *Visitor) resolveFieldExport(fieldRef int) *resolve.FieldExport {
 	}
 	v.exportedVariables[exportAs] = struct{}{}
 
-	typeName := v.Operation.ResolveTypeNameString(v.Operation.VariableDefinitions[variableDefinition].Type)
-	isListType := v.Operation.IsListType(v.Operation.VariableDefinitions[variableDefinition].Type)
+	variableType := v.Operation.VariableDefinitions[variableDefinition].Type
+	fieldExport := &resolve.FieldExport{Path: []string{exportAs}, AsArray: v.Operation.IsListType(variableType)}
+	typeName := v.Operation.ResolveTypeNameString(variableType)
 	switch typeName {
-	case "Int", "Float", "Boolean":
-		return &resolve.FieldExport{
-			Path:       []string{exportAs},
-			IsListType: isListType,
-		}
+	case "Int", "Float":
+	case "Boolean":
+		fieldExport.AsBoolean = true
 	default:
-		return &resolve.FieldExport{
-			Path:       []string{exportAs},
-			AsString:   true,
-			IsListType: isListType,
-		}
+		fieldExport.AsString = true
 	}
+	return fieldExport
 }
 
 func (v *Visitor) fieldRequiresExportedVariable(fieldRef int) bool {

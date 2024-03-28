@@ -134,9 +134,11 @@ var (
 	LocationInputFieldDefinition = []byte("INPUT_FIELD_DEFINITION")
 )
 
-const (
-	DOUBLE_LBRACE_STR = "{{"
-	DOUBLE_RBRACE_STR = "}}"
+var (
+	ZeroArrayValue  = []byte("[]")
+	ZeroObjectValue = []byte("{}")
+	ZeroStringValue = []byte(`""`)
+	ZeroNumberValue = []byte("0")
 )
 
 type Literal []byte

@@ -870,14 +870,14 @@ func (r *Resolver) resolveArrayAsynchronous(ctx *Context, array *Array, arrayIte
 	return
 }
 
-func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte) {
+func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte, zeroValue ...[]byte) {
 	if export == nil {
 		return
 	}
 	if export.AsString {
 		value = append(literal.QUOTE, append(value, literal.QUOTE...)...)
 	}
-	if export.IsListType {
+	if export.AsArray {
 		dataValue, dataType, _, _ := jsonparser.Get(ctx.Variables, export.Path...)
 		switch dataType {
 		case jsonparser.Array:
@@ -899,6 +899,14 @@ func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte) 
 
 		dataValue = append(dataValue, value...)
 		value = append(dataValue, literal.RBRACK...)
+	} else if export.AsBoolean && len(zeroValue) > 0 {
+		value = literal.TRUE
+		for _, item := range zeroValue {
+			if bytes.Equal(item, value) {
+				value = literal.FALSE
+				break
+			}
+		}
 	}
 	ctx.Variables, _ = jsonparser.Set(ctx.Variables, value, export.Path...)
 }
@@ -913,7 +921,7 @@ func (r *Resolver) resolveInteger(ctx *Context, integer *Integer, data []byte, i
 		return nil
 	}
 	integerBuf.Data.WriteBytes(value)
-	r.exportField(ctx, integer.Export, value)
+	r.exportField(ctx, integer.Export, value, literal.ZeroNumberValue)
 	return nil
 }
 
@@ -927,7 +935,7 @@ func (r *Resolver) resolveFloat(ctx *Context, floatValue *Float, data []byte, fl
 		return nil
 	}
 	floatBuf.Data.WriteBytes(value)
-	r.exportField(ctx, floatValue.Export, value)
+	r.exportField(ctx, floatValue.Export, value, literal.ZeroNumberValue)
 	return nil
 }
 
@@ -1035,7 +1043,7 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 		}
 
 		stringBuf.Data.WriteBytes(value)
-		r.exportField(ctx, str.Export, value)
+		r.exportField(ctx, str.Export, value, literal.ZeroArrayValue, literal.ZeroObjectValue, literal.ZeroStringValue)
 		return nil
 	}
 
@@ -1044,7 +1052,7 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 	stringBuf.Data.WriteBytes(quote)
 	stringBuf.Data.WriteBytes(value)
 	stringBuf.Data.WriteBytes(quote)
-	r.exportField(ctx, str.Export, value)
+	r.exportField(ctx, str.Export, value, literal.ZeroStringValue)
 	return nil
 }
 
@@ -1539,9 +1547,10 @@ func (_ *BatchFetch) FetchKind() FetchKind {
 // FieldExport takes the value of the field during evaluation (rendering of the field)
 // and stores it in the variables using the Path as JSON pointer.
 type FieldExport struct {
-	Path       []string
-	AsString   bool
-	IsListType bool
+	Path      []string
+	AsArray   bool
+	AsString  bool
+	AsBoolean bool
 }
 
 type String struct {
