@@ -1184,17 +1184,11 @@ func (v *Visitor) configureObjectFetch(config objectFetchConfiguration) {
 	fetchConfig := config.planner.ConfigureFetch()
 	fetch := v.configureFetch(config, fetchConfig)
 
-	var disallowParallelFetch bool
-	if disallow, ok := config.planner.(DataSourcePlannerDisallow); ok {
-		disallowParallelFetch = disallow.DisallowParallelFetch()
-	}
 	switch f := fetch.(type) {
 	case *resolve.SingleFetch:
 		v.resolveInputTemplates(config, &f.Input, &f.Variables)
-		f.DisallowParallelFetch = disallowParallelFetch
 	case *resolve.BatchFetch:
 		v.resolveInputTemplates(config, &f.Fetch.Input, &f.Fetch.Variables)
-		f.Fetch.DisallowParallelFetch = disallowParallelFetch
 	}
 	if config.object.Fetch == nil {
 		config.object.Fetch = fetch
@@ -1229,6 +1223,7 @@ func (v *Visitor) configureFetch(internal objectFetchConfiguration, external Fet
 		DataSource:                            external.DataSource,
 		Variables:                             external.Variables,
 		DisallowSingleFlight:                  external.DisallowSingleFlight,
+		DisallowParallelFetch:                 external.DisallowParallelFetch,
 		DataSourceIdentifier:                  []byte(dataSourceType),
 		ProcessResponseConfig:                 external.ProcessResponseConfig,
 		DisableDataLoader:                     external.DisableDataLoader,
@@ -1360,10 +1355,6 @@ type DataSourcePlanner interface {
 	DownstreamResponseFieldAlias(downstreamFieldRef int) (alias string, exists bool)
 }
 
-type DataSourcePlannerDisallow interface {
-	DisallowParallelFetch() bool
-}
-
 type SubscriptionConfiguration struct {
 	Input      string
 	Variables  resolve.Variables
@@ -1379,6 +1370,7 @@ type FetchConfiguration struct {
 	// If this is set to false, the planner might still decide to override it,
 	// e.g. if a field depends on an exported variable which doesn't work with DataLoader
 	DisableDataLoader     bool
+	DisallowParallelFetch bool
 	ProcessResponseConfig resolve.ProcessResponseConfig
 	BatchConfig           BatchConfig
 	// SetTemplateOutputToNullOnVariableNull will safely return "null" if one of the template variables renders to null
