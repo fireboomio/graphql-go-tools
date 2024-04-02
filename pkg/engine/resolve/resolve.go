@@ -1161,7 +1161,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				skipBuffer = skipBuffer || (includeErr != nil || !include)
 			}
 			if expression := includeDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
-				skipBuffer = skipBuffer || ctx.RuleEvaluate(ctx.Variables, expression)
+				skipBuffer = skipBuffer || !ctx.RuleEvaluate(ctx.Variables, expression)
 			}
 		}
 		if skipBuffer {
