@@ -618,7 +618,7 @@ func (v *Visitor) resolveSkip(directiveRefs []int) resolve.SkipDirective {
 				field.Defined, field.VariableName = true, v.Operation.VariableValueNameString(value.Ref)
 			}
 		}
-		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.Expression); ok {
+		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.IfRule); ok {
 			field.Defined, field.Expression = true, v.Operation.ValueContentString(value)
 		}
 	}
@@ -636,7 +636,7 @@ func (v *Visitor) resolveInclude(directiveRefs []int) resolve.IncludeDirective {
 				field.Defined, field.VariableName = true, v.Operation.VariableValueNameString(value.Ref)
 			}
 		}
-		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.Expression); ok {
+		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.IfRule); ok {
 			field.Defined, field.Expression = true, v.Operation.ValueContentString(value)
 		}
 	}

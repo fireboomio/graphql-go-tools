@@ -134,7 +134,7 @@ var (
 	LocationInputFieldDefinition = []byte("INPUT_FIELD_DEFINITION")
 )
 
-var Expression = []byte("expression")
+var IfRule = []byte("ifRule")
 
 var (
 	ZeroArrayValue  = []byte("[]")
