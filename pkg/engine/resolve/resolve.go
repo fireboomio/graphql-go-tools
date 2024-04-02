@@ -117,6 +117,7 @@ type AfterFetchHook interface {
 
 type Context struct {
 	context.Context
+	RuleEvaluate     func([]byte, string) bool
 	Variables        []byte
 	Request          Request
 	pathElements     [][]byte
@@ -287,15 +288,6 @@ func (c *Context) popNextPatch() (patch patch, ok bool) {
 		return patch, false
 	}
 	return c.patches[c.currentPatch], true
-}
-
-const ruleEvaluationFunctionKey = "ruleEvaluationFunction"
-
-type ruleEvaluationFunction = func([]byte, string) bool
-
-func (c *Context) GetRuleEvaluationFunction() func([]byte, string) bool {
-	ruleFunc, _ := c.Context.Value(ruleEvaluationFunctionKey).(ruleEvaluationFunction)
-	return ruleFunc
 }
 
 type patch struct {
@@ -1150,7 +1142,6 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
-	ruleFunc := ctx.GetRuleEvaluationFunction()
 	skipBufferIds := make(map[int]bool)
 	for i := range object.Fields {
 		field := object.Fields[i]
@@ -1160,8 +1151,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				skip, skipErr := jsonparser.GetBoolean(ctx.Variables, ifName)
 				skipBuffer = skipBuffer || (skipErr == nil && skip)
 			}
-			if expression := skipDirective.Expression; len(expression) > 0 && ruleFunc != nil {
-				skipBuffer = skipBuffer || ruleFunc(ctx.Variables, expression)
+			if expression := skipDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
+				skipBuffer = skipBuffer || ctx.RuleEvaluate(ctx.Variables, expression)
 			}
 		}
 		if includeDirective := field.IncludeDirective; includeDirective.Defined {
@@ -1169,8 +1160,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				include, includeErr := jsonparser.GetBoolean(ctx.Variables, ifName)
 				skipBuffer = skipBuffer || (includeErr != nil || !include)
 			}
-			if expression := includeDirective.Expression; len(expression) > 0 && ruleFunc != nil {
-				skipBuffer = skipBuffer || ruleFunc(ctx.Variables, expression)
+			if expression := includeDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
+				skipBuffer = skipBuffer || ctx.RuleEvaluate(ctx.Variables, expression)
 			}
 		}
 		if skipBuffer {
