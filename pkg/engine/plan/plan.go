@@ -1215,7 +1215,7 @@ func (v *Visitor) configureObjectFetch(config objectFetchConfiguration) {
 		}
 		config.object.Fetch = parallel
 	case *resolve.ParallelFetch:
-		existing.DisallowParallel = disallowParallelFetch
+		existing.DisallowParallel = existing.DisallowParallel || disallowParallelFetch
 		existing.Fetches = append(existing.Fetches, fetch)
 	}
 }
