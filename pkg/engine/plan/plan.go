@@ -1184,38 +1184,37 @@ func (v *Visitor) configureObjectFetch(config objectFetchConfiguration) {
 	fetchConfig := config.planner.ConfigureFetch()
 	fetch := v.configureFetch(config, fetchConfig)
 
+	var disallowParallelFetch bool
+	if disallow, ok := config.planner.(DataSourcePlannerDisallow); ok {
+		disallowParallelFetch = disallow.DisallowParallelFetch()
+	}
 	switch f := fetch.(type) {
 	case *resolve.SingleFetch:
 		v.resolveInputTemplates(config, &f.Input, &f.Variables)
+		f.DisallowParallelFetch = disallowParallelFetch
 	case *resolve.BatchFetch:
 		v.resolveInputTemplates(config, &f.Fetch.Input, &f.Fetch.Variables)
+		f.Fetch.DisallowParallelFetch = disallowParallelFetch
 	}
 	if config.object.Fetch == nil {
 		config.object.Fetch = fetch
 		return
 	}
 
-	var disallowParallelFetch bool
-	if disallow, ok := config.planner.(DataSourcePlannerDisallow); ok {
-		disallowParallelFetch = disallow.DisallowParallelFetch()
-	}
 	switch existing := config.object.Fetch.(type) {
 	case *resolve.SingleFetch:
 		copyOfExisting := *existing
 		parallel := &resolve.ParallelFetch{
-			DisallowParallel: disallowParallelFetch,
-			Fetches:          []resolve.Fetch{&copyOfExisting, fetch},
+			Fetches: []resolve.Fetch{&copyOfExisting, fetch},
 		}
 		config.object.Fetch = parallel
 	case *resolve.BatchFetch:
 		copyOfExisting := *existing
 		parallel := &resolve.ParallelFetch{
-			DisallowParallel: disallowParallelFetch,
-			Fetches:          []resolve.Fetch{&copyOfExisting, fetch},
+			Fetches: []resolve.Fetch{&copyOfExisting, fetch},
 		}
 		config.object.Fetch = parallel
 	case *resolve.ParallelFetch:
-		existing.DisallowParallel = existing.DisallowParallel || disallowParallelFetch
 		existing.Fetches = append(existing.Fetches, fetch)
 	}
 }

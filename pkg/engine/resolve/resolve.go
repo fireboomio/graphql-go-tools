@@ -1350,6 +1350,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	wg := r.getWaitGroup()
 	defer r.freeWaitGroup(wg)
 
+	var disallowParallelFetch bool
 	for i := range fetch.Fetches {
 		wg.Add(1)
 		var skipFetch bool
@@ -1370,6 +1371,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 			resolvers = append(resolvers, func() error {
 				return r.resolveSingleFetch(ctx, f, preparedInput.Data, buf)
 			})
+			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
 			preparedInput := r.getBufPair()
 			*preparedInputs = append(*preparedInputs, preparedInput)
@@ -1386,11 +1388,12 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 			resolvers = append(resolvers, func() error {
 				return r.resolveBatchFetch(ctx, f, preparedInput.Data, buf)
 			})
+			disallowParallelFetch = disallowParallelFetch || f.Fetch.DisallowParallelFetch
 		}
 	}
 
 	for _, resolver := range resolvers {
-		if fetch.DisallowParallel {
+		if disallowParallelFetch {
 			if err = resolver(); err != nil {
 				return err
 			}
@@ -1516,6 +1519,7 @@ type SingleFetch struct {
 	// should be allowed to use SingleFlight
 	DisallowSingleFlight  bool
 	DisableDataLoader     bool
+	DisallowParallelFetch bool
 	InputTemplate         InputTemplate
 	DataSourceIdentifier  []byte
 	ProcessResponseConfig ProcessResponseConfig
@@ -1535,8 +1539,7 @@ func (_ *SingleFetch) FetchKind() FetchKind {
 }
 
 type ParallelFetch struct {
-	DisallowParallel bool
-	Fetches          []Fetch
+	Fetches []Fetch
 }
 
 func (_ *ParallelFetch) FetchKind() FetchKind {
