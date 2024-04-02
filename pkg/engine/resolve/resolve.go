@@ -291,9 +291,9 @@ func (c *Context) popNextPatch() (patch patch, ok bool) {
 
 const ruleEvaluationFunctionKey = "ruleEvaluationFunction"
 
-type ruleEvaluationFunction = func(string) bool
+type ruleEvaluationFunction = func([]byte, string) bool
 
-func (c *Context) GetRuleEvaluationFunction() func(string) bool {
+func (c *Context) GetRuleEvaluationFunction() func([]byte, string) bool {
 	ruleFunc, _ := c.Context.Value(ruleEvaluationFunctionKey).(ruleEvaluationFunction)
 	return ruleFunc
 }
@@ -1161,7 +1161,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				skipBuffer = skipBuffer && skipErr == nil && skip
 			}
 			if expression := skipDirective.Expression; len(expression) > 0 && ruleFunc != nil {
-				skipBuffer = skipBuffer && ruleFunc(expression)
+				skipBuffer = skipBuffer && ruleFunc(ctx.Variables, expression)
 			}
 		}
 		if includeDirective := field.IncludeDirective; includeDirective.Defined {
@@ -1170,7 +1170,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				skipBuffer = skipBuffer && includeErr != nil || !include
 			}
 			if expression := includeDirective.Expression; len(expression) > 0 && ruleFunc != nil {
-				skipBuffer = skipBuffer && ruleFunc(expression)
+				skipBuffer = skipBuffer && ruleFunc(ctx.Variables, expression)
 			}
 		}
 		if skipBuffer {
