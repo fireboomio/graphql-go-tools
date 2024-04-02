@@ -1194,20 +1194,28 @@ func (v *Visitor) configureObjectFetch(config objectFetchConfiguration) {
 		config.object.Fetch = fetch
 		return
 	}
+
+	var disallowParallelFetch bool
+	if disallow, ok := config.planner.(DataSourcePlannerDisallow); ok {
+		disallowParallelFetch = disallow.DisallowParallelFetch()
+	}
 	switch existing := config.object.Fetch.(type) {
 	case *resolve.SingleFetch:
 		copyOfExisting := *existing
 		parallel := &resolve.ParallelFetch{
-			Fetches: []resolve.Fetch{&copyOfExisting, fetch},
+			DisallowParallel: disallowParallelFetch,
+			Fetches:          []resolve.Fetch{&copyOfExisting, fetch},
 		}
 		config.object.Fetch = parallel
 	case *resolve.BatchFetch:
 		copyOfExisting := *existing
 		parallel := &resolve.ParallelFetch{
-			Fetches: []resolve.Fetch{&copyOfExisting, fetch},
+			DisallowParallel: disallowParallelFetch,
+			Fetches:          []resolve.Fetch{&copyOfExisting, fetch},
 		}
 		config.object.Fetch = parallel
 	case *resolve.ParallelFetch:
+		existing.DisallowParallel = disallowParallelFetch
 		existing.Fetches = append(existing.Fetches, fetch)
 	}
 }
@@ -1351,6 +1359,10 @@ type DataSourcePlanner interface {
 	// The DataSourcePlanner could keep track that it rewrites the upstream query and use DownstreamResponseFieldAlias
 	// to indicate to the Planner to expect the response for countryAlias on the path "countryAlias" instead of "country".
 	DownstreamResponseFieldAlias(downstreamFieldRef int) (alias string, exists bool)
+}
+
+type DataSourcePlannerDisallow interface {
+	DisallowParallelFetch() bool
 }
 
 type SubscriptionConfiguration struct {

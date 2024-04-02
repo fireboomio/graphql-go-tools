@@ -1390,10 +1390,17 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	}
 
 	for _, resolver := range resolvers {
-		go func(r func() error) {
-			_ = r()
+		if fetch.DisallowParallel {
+			if err = resolver(); err != nil {
+				return err
+			}
 			wg.Done()
-		}(resolver)
+		} else {
+			go func(r func() error) {
+				_ = r()
+				wg.Done()
+			}(resolver)
+		}
 	}
 
 	wg.Wait()
@@ -1528,7 +1535,8 @@ func (_ *SingleFetch) FetchKind() FetchKind {
 }
 
 type ParallelFetch struct {
-	Fetches []Fetch
+	DisallowParallel bool
+	Fetches          []Fetch
 }
 
 func (_ *ParallelFetch) FetchKind() FetchKind {
