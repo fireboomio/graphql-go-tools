@@ -146,16 +146,6 @@ scalar String
 scalar Boolean
 "The 'ID' scalar type represents a unique identifier, often used to refetch an object or as key for a cache. The ID type appears in a JSON response as a String; however, it is not intended to be human-readable. When expected as an input type, any string (such as '4') or integer (such as 4) input value will be accepted as an ID."
 scalar ID
-"Directs the executor to include this field or fragment only when the argument is true."
-directive @include(
-    " Included when true."
-    if: Boolean!
-) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
-"Directs the executor to skip this field or fragment when the argument is true."
-directive @skip(
-    "Skipped when true."
-    if: Boolean!
-) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 "Marks an element of a GraphQL schema as no longer supported."
 directive @deprecated(
     """
