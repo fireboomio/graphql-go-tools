@@ -379,15 +379,9 @@ type Visitor struct {
 	skipFieldPaths               []string
 	fieldConfigs                 map[int]*FieldConfiguration
 	exportedVariables            map[string]struct{}
-	skipIncludeFields            map[int]skipIncludeField
+	skipFields                   map[int]resolve.SkipDirective
+	includeFields                map[int]resolve.IncludeDirective
 	disableResolveFieldPositions bool
-}
-
-type skipIncludeField struct {
-	skip                bool
-	skipVariableName    string
-	include             bool
-	includeVariableName string
 }
 
 type objectFields struct {
@@ -475,8 +469,8 @@ func (v *Visitor) EnterDirective(ref int) {
 
 func (v *Visitor) EnterInlineFragment(ref int) {
 	directives := v.Operation.InlineFragments[ref].Directives.Refs
-	skip, skipVariableName := v.resolveSkip(directives)
-	include, includeVariableName := v.resolveInclude(directives)
+	skip := v.resolveSkip(directives)
+	include := v.resolveInclude(directives)
 	set := v.Operation.InlineFragments[ref].SelectionSet
 	if set == -1 {
 		return
@@ -484,14 +478,12 @@ func (v *Visitor) EnterInlineFragment(ref int) {
 	for _, selection := range v.Operation.SelectionSets[set].SelectionRefs {
 		switch v.Operation.Selections[selection].Kind {
 		case ast.SelectionKindField:
-			ref := v.Operation.Selections[selection].Ref
-			if skip || include {
-				v.skipIncludeFields[ref] = skipIncludeField{
-					skip:                skip,
-					skipVariableName:    skipVariableName,
-					include:             include,
-					includeVariableName: includeVariableName,
-				}
+			selectionRef := v.Operation.Selections[selection].Ref
+			if skip.Defined {
+				v.skipFields[selectionRef] = skip
+			}
+			if include.Defined {
+				v.includeFields[selectionRef] = include
 			}
 		}
 	}
@@ -515,8 +507,8 @@ func (v *Visitor) EnterField(ref int) {
 		return
 	}
 
-	skip, skipVariableName := v.resolveSkipForField(ref)
-	include, includeVariableName := v.resolveIncludeForField(ref)
+	skip := v.resolveSkipForField(ref)
+	include := v.resolveIncludeForField(ref)
 
 	fieldName := v.Operation.FieldNameBytes(ref)
 	fieldAliasOrName := v.Operation.FieldAliasOrNameBytes(ref)
@@ -528,12 +520,10 @@ func (v *Visitor) EnterField(ref int) {
 				Path:       []string{"__typename"},
 				IsTypeName: true,
 			},
-			OnTypeName:              v.resolveOnTypeName(),
-			Position:                v.resolveFieldPosition(ref),
-			SkipDirectiveDefined:    skip,
-			SkipVariableName:        skipVariableName,
-			IncludeDirectiveDefined: include,
-			IncludeVariableName:     includeVariableName,
+			OnTypeName:       v.resolveOnTypeName(),
+			Position:         v.resolveFieldPosition(ref),
+			SkipDirective:    skip,
+			IncludeDirective: include,
 		}
 		*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 		return
@@ -570,16 +560,14 @@ func (v *Visitor) EnterField(ref int) {
 	bufferID, hasBuffer := v.fieldBuffers[ref]
 
 	v.currentField = &resolve.Field{
-		Name:                    fieldAliasOrName,
-		Value:                   v.resolveFieldValue(ref, fieldDefinitionType, true, path),
-		HasBuffer:               hasBuffer,
-		BufferID:                bufferID,
-		OnTypeName:              v.resolveOnTypeName(),
-		Position:                v.resolveFieldPosition(ref),
-		SkipDirectiveDefined:    skip,
-		SkipVariableName:        skipVariableName,
-		IncludeDirectiveDefined: include,
-		IncludeVariableName:     includeVariableName,
+		Name:             fieldAliasOrName,
+		Value:            v.resolveFieldValue(ref, fieldDefinitionType, true, path),
+		HasBuffer:        hasBuffer,
+		BufferID:         bufferID,
+		OnTypeName:       v.resolveOnTypeName(),
+		Position:         v.resolveFieldPosition(ref),
+		SkipDirective:    skip,
+		IncludeDirective: include,
 	}
 
 	*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
@@ -603,48 +591,56 @@ func (v *Visitor) resolveFieldPosition(ref int) resolve.Position {
 	}
 }
 
-func (v *Visitor) resolveSkipForField(ref int) (bool, string) {
-	skipInclude, ok := v.skipIncludeFields[ref]
+func (v *Visitor) resolveSkipForField(ref int) resolve.SkipDirective {
+	field, ok := v.skipFields[ref]
 	if ok {
-		return skipInclude.skip, skipInclude.skipVariableName
+		return field
 	}
 	return v.resolveSkip(v.Operation.Fields[ref].Directives.Refs)
 }
 
-func (v *Visitor) resolveIncludeForField(ref int) (bool, string) {
-	skipInclude, ok := v.skipIncludeFields[ref]
+func (v *Visitor) resolveIncludeForField(ref int) resolve.IncludeDirective {
+	field, ok := v.includeFields[ref]
 	if ok {
-		return skipInclude.include, skipInclude.includeVariableName
+		return field
 	}
 	return v.resolveInclude(v.Operation.Fields[ref].Directives.Refs)
 }
 
-func (v *Visitor) resolveSkip(directiveRefs []int) (bool, string) {
+func (v *Visitor) resolveSkip(directiveRefs []int) resolve.SkipDirective {
+	field := resolve.SkipDirective{}
 	for _, i := range directiveRefs {
 		if v.Operation.DirectiveNameString(i) != "skip" {
 			continue
 		}
 		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.IF); ok {
 			if value.Kind == ast.ValueKindVariable {
-				return true, v.Operation.VariableValueNameString(value.Ref)
+				field.Defined, field.VariableName = true, v.Operation.VariableValueNameString(value.Ref)
 			}
 		}
+		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.Expression); ok {
+			field.Defined, field.Expression = true, v.Operation.ValueContentString(value)
+		}
 	}
-	return false, ""
+	return field
 }
 
-func (v *Visitor) resolveInclude(directiveRefs []int) (bool, string) {
+func (v *Visitor) resolveInclude(directiveRefs []int) resolve.IncludeDirective {
+	field := resolve.IncludeDirective{}
 	for _, i := range directiveRefs {
 		if v.Operation.DirectiveNameString(i) != "include" {
 			continue
 		}
 		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.IF); ok {
 			if value.Kind == ast.ValueKindVariable {
-				return true, v.Operation.VariableValueNameString(value.Ref)
+				field.Defined, field.VariableName = true, v.Operation.VariableValueNameString(value.Ref)
 			}
 		}
+		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.Expression); ok {
+			field.Defined, field.Expression = true, v.Operation.ValueContentString(value)
+		}
 	}
-	return false, ""
+	return field
 }
 
 func (v *Visitor) resolveOnTypeName() []byte {
@@ -941,7 +937,8 @@ func (v *Visitor) EnterDocument(operation, definition *ast.Document) {
 	v.Operation, v.Definition = operation, definition
 	v.fieldConfigs = map[int]*FieldConfiguration{}
 	v.exportedVariables = map[string]struct{}{}
-	v.skipIncludeFields = map[int]skipIncludeField{}
+	v.skipFields = map[int]resolve.SkipDirective{}
+	v.includeFields = map[int]resolve.IncludeDirective{}
 }
 
 func (v *Visitor) LeaveDocument(_, _ *ast.Document) {

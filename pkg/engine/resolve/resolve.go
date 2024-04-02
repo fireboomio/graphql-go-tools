@@ -289,6 +289,15 @@ func (c *Context) popNextPatch() (patch patch, ok bool) {
 	return c.patches[c.currentPatch], true
 }
 
+const ruleEvaluationFunctionKey = "ruleEvaluationFunction"
+
+type ruleEvaluationFunction = func(string) bool
+
+func (c *Context) GetRuleEvaluationFunction() func(string) bool {
+	ruleFunc, _ := c.Context.Value(ruleEvaluationFunctionKey).(ruleEvaluationFunction)
+	return ruleFunc
+}
+
 type patch struct {
 	path, extraPath, data []byte
 	index                 int
@@ -1141,22 +1150,31 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
+	ruleFunc := ctx.GetRuleEvaluationFunction()
 	skipBufferIds := make(map[int]bool)
 	for i := range object.Fields {
-		if object.Fields[i].SkipDirectiveDefined {
-			skip, err := jsonparser.GetBoolean(ctx.Variables, object.Fields[i].SkipVariableName)
-			if err == nil && skip {
-				skipBufferIds[object.Fields[i].BufferID] = true
+		field := object.Fields[i]
+		var skipBuffer bool
+		if skipDirective := field.SkipDirective; skipDirective.Defined {
+			if ifName := skipDirective.VariableName; len(ifName) > 0 {
+				skip, skipErr := jsonparser.GetBoolean(ctx.Variables, ifName)
+				skipBuffer = skipBuffer && skipErr == nil && skip
 			}
-			continue
+			if expression := skipDirective.Expression; len(expression) > 0 && ruleFunc != nil {
+				skipBuffer = skipBuffer && ruleFunc(expression)
+			}
 		}
-
-		if object.Fields[i].IncludeDirectiveDefined {
-			include, err := jsonparser.GetBoolean(ctx.Variables, object.Fields[i].IncludeVariableName)
-			if err != nil || !include {
-				skipBufferIds[object.Fields[i].BufferID] = true
+		if includeDirective := field.IncludeDirective; includeDirective.Defined {
+			if ifName := includeDirective.VariableName; len(ifName) > 0 {
+				include, includeErr := jsonparser.GetBoolean(ctx.Variables, ifName)
+				skipBuffer = skipBuffer && includeErr != nil || !include
 			}
-			continue
+			if expression := includeDirective.Expression; len(expression) > 0 && ruleFunc != nil {
+				skipBuffer = skipBuffer && ruleFunc(expression)
+			}
+		}
+		if skipBuffer {
+			skipBufferIds[object.Fields[i].BufferID] = true
 		}
 	}
 
@@ -1466,19 +1484,35 @@ func (_ *EmptyArray) NodeKind() NodeKind {
 }
 
 type Field struct {
-	Name                    []byte
-	Value                   Node
-	Position                Position
-	Defer                   *DeferField
-	Stream                  *StreamField
-	HasBuffer               bool
-	BufferID                int
-	OnTypeName              []byte
-	SkipDirectiveDefined    bool
-	SkipVariableName        string
+	Name             []byte
+	Value            Node
+	Position         Position
+	Defer            *DeferField
+	Stream           *StreamField
+	HasBuffer        bool
+	BufferID         int
+	OnTypeName       []byte
+	SkipDirective    SkipDirective
+	IncludeDirective IncludeDirective
+
+	// deprecated, only test on use
+	SkipDirectiveDefined bool
+	// deprecated, only test on use
+	SkipVariableName string
+	// deprecated, only test on use
 	IncludeDirectiveDefined bool
-	IncludeVariableName     string
+	// deprecated, only test on use
+	IncludeVariableName string
 }
+
+type (
+	SkipDirective struct {
+		Defined      bool
+		VariableName string
+		Expression   string
+	}
+	IncludeDirective SkipDirective
+)
 
 type Position struct {
 	Line   uint32

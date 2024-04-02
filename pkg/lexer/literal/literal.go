@@ -134,6 +134,8 @@ var (
 	LocationInputFieldDefinition = []byte("INPUT_FIELD_DEFINITION")
 )
 
+var Expression = []byte("expression")
+
 var (
 	ZeroArrayValue  = []byte("[]")
 	ZeroObjectValue = []byte("{}")
