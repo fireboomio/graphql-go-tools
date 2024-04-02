@@ -1158,19 +1158,19 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		if skipDirective := field.SkipDirective; skipDirective.Defined {
 			if ifName := skipDirective.VariableName; len(ifName) > 0 {
 				skip, skipErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-				skipBuffer = skipBuffer && skipErr == nil && skip
+				skipBuffer = skipBuffer || (skipErr == nil && skip)
 			}
 			if expression := skipDirective.Expression; len(expression) > 0 && ruleFunc != nil {
-				skipBuffer = skipBuffer && ruleFunc(ctx.Variables, expression)
+				skipBuffer = skipBuffer || ruleFunc(ctx.Variables, expression)
 			}
 		}
 		if includeDirective := field.IncludeDirective; includeDirective.Defined {
 			if ifName := includeDirective.VariableName; len(ifName) > 0 {
 				include, includeErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-				skipBuffer = skipBuffer && includeErr != nil || !include
+				skipBuffer = skipBuffer || (includeErr != nil || !include)
 			}
 			if expression := includeDirective.Expression; len(expression) > 0 && ruleFunc != nil {
-				skipBuffer = skipBuffer && ruleFunc(ctx.Variables, expression)
+				skipBuffer = skipBuffer || ruleFunc(ctx.Variables, expression)
 			}
 		}
 		if skipBuffer {
