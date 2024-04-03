@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/exp/slices"
 	"io"
 	"net/http"
 	"strconv"
@@ -1143,29 +1144,46 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	}
 
 	skipBufferIds := make(map[int]bool)
+	addSkipBufferIdFunc := func(index int, skipEffective ...bool) bool {
+		if !slices.Contains(skipEffective, false) {
+			skipBufferIds[object.Fields[index].BufferID] = true
+			return true
+		}
+		return false
+	}
 	for i := range object.Fields {
 		field := object.Fields[i]
-		var skipBuffer bool
 		if skipDirective := field.SkipDirective; skipDirective.Defined {
+			var skipEffective []bool
 			if ifName := skipDirective.VariableName; len(ifName) > 0 {
 				skip, skipErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-				skipBuffer = skipBuffer || (skipErr == nil && skip)
+				skipEffective = append(skipEffective, skipErr == nil && skip)
 			}
 			if expression := skipDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
-				skipBuffer = skipBuffer || ctx.RuleEvaluate(ctx.Variables, expression)
+				if skipDirective.ExpressionIsVariable {
+					expression, _ = jsonparser.GetString(ctx.Variables, expression)
+				}
+				skipEffective = append(skipEffective, ctx.RuleEvaluate(ctx.Variables, expression))
+			}
+			if addSkipBufferIdFunc(i, skipEffective...) {
+				continue
 			}
 		}
 		if includeDirective := field.IncludeDirective; includeDirective.Defined {
+			var skipEffective []bool
 			if ifName := includeDirective.VariableName; len(ifName) > 0 {
 				include, includeErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-				skipBuffer = skipBuffer || (includeErr != nil || !include)
+				skipEffective = append(skipEffective, includeErr != nil || !include)
 			}
 			if expression := includeDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
-				skipBuffer = skipBuffer || !ctx.RuleEvaluate(ctx.Variables, expression)
+				if includeDirective.ExpressionIsVariable {
+					expression, _ = jsonparser.GetString(ctx.Variables, expression)
+				}
+				skipEffective = append(skipEffective, !ctx.RuleEvaluate(ctx.Variables, expression))
 			}
-		}
-		if skipBuffer {
-			skipBufferIds[object.Fields[i].BufferID] = true
+			if addSkipBufferIdFunc(i, skipEffective...) {
+				continue
+			}
 		}
 	}
 
@@ -1498,9 +1516,10 @@ type Field struct {
 
 type (
 	SkipDirective struct {
-		Defined      bool
-		VariableName string
-		Expression   string
+		Defined              bool
+		VariableName         string
+		Expression           string
+		ExpressionIsVariable bool
 	}
 	IncludeDirective SkipDirective
 )

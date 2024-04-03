@@ -619,7 +619,12 @@ func (v *Visitor) resolveSkip(directiveRefs []int) resolve.SkipDirective {
 			}
 		}
 		if value, ok := v.Operation.DirectiveArgumentValueByName(i, literal.IfRule); ok {
-			field.Defined, field.Expression = true, v.Operation.ValueContentString(value)
+			field.Defined, field.ExpressionIsVariable = true, value.Kind == ast.ValueKindVariable
+			if field.ExpressionIsVariable {
+				field.Expression = v.Operation.VariableValueNameString(value.Ref)
+			} else {
+				field.Expression = v.Operation.ValueContentString(value)
+			}
 		}
 	}
 	return field
