@@ -1143,10 +1143,13 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
-	skipBufferIds := make(map[int]bool)
-	addSkipBufferIdFunc := func(index int, skipEffective ...bool) bool {
+	skipBufferIds, skipFieldIndexes := make(map[int]bool), make(map[int]bool)
+	addSkipDataFunc := func(index int, skipEffective ...bool) bool {
 		if !slices.Contains(skipEffective, false) {
-			skipBufferIds[object.Fields[index].BufferID] = true
+			skipFieldIndexes[index] = true
+			if field := object.Fields[index]; field.HasBuffer {
+				skipBufferIds[field.BufferID] = true
+			}
 			return true
 		}
 		return false
@@ -1165,7 +1168,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				}
 				skipEffective = append(skipEffective, ctx.RuleEvaluate(ctx.Variables, expression))
 			}
-			if addSkipBufferIdFunc(i, skipEffective...) {
+			if addSkipDataFunc(i, skipEffective...) {
 				continue
 			}
 		}
@@ -1181,7 +1184,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				}
 				skipEffective = append(skipEffective, !ctx.RuleEvaluate(ctx.Variables, expression))
 			}
-			if addSkipBufferIdFunc(i, skipEffective...) {
+			if addSkipDataFunc(i, skipEffective...) {
 				continue
 			}
 		}
@@ -1213,7 +1216,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	first := true
 	skipCount := 0
 	for i := range object.Fields {
-		if _, ok := skipBufferIds[object.Fields[i].BufferID]; ok {
+		if _, ok := skipFieldIndexes[i]; ok {
 			skipCount++
 			continue
 		}
