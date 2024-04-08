@@ -1050,10 +1050,9 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 	}
 
 	value = r.renameTypeName(ctx, str, value)
+	value = append(literal.QUOTE, append(value, literal.QUOTE...)...)
 
-	stringBuf.Data.WriteBytes(quote)
 	stringBuf.Data.WriteBytes(value)
-	stringBuf.Data.WriteBytes(quote)
 	r.exportField(ctx, str.Export, value, literal.ZeroStringValue)
 	return nil
 }
