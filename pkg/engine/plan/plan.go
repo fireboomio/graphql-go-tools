@@ -36,6 +36,7 @@ type Configuration struct {
 	// This setting removes position information from all fields
 	// In production, this should be set to false so that error messages are easier to understand
 	DisableResolveFieldPositions bool
+	DisallowParallelFunc         func(*ast.Document) bool
 }
 
 type DirectiveConfigurations []DirectiveConfiguration
@@ -1184,6 +1185,10 @@ func (v *Visitor) configureObjectFetch(config objectFetchConfiguration) {
 		return
 	}
 	fetchConfig := config.planner.ConfigureFetch()
+	if disallowFunc := v.Config.DisallowParallelFunc; disallowFunc != nil {
+		fetchConfig.DisallowParallelFetch = disallowFunc(v.Operation)
+		fetchConfig.DisallowSingleFlight = fetchConfig.DisallowSingleFlight || fetchConfig.DisallowParallelFetch
+	}
 	fetch := v.configureFetch(config, fetchConfig)
 
 	switch f := fetch.(type) {

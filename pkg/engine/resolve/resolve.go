@@ -1117,6 +1117,42 @@ func (r *Resolver) addResolveError(ctx *Context, objectBuf *BufPair) {
 	objectBuf.WriteErr(unableToResolveMsg, locations.Bytes(), pathBytes, nil)
 }
 
+func (r *Resolver) resolveSkipField(ctx *Context, field *Field) (skip bool) {
+	if skipDirective := field.SkipDirective; skipDirective.Defined {
+		var skipEffective []bool
+		if ifName := skipDirective.VariableName; len(ifName) > 0 {
+			skip, skipErr := jsonparser.GetBoolean(ctx.Variables, ifName)
+			skipEffective = append(skipEffective, skipErr == nil && skip)
+		}
+		if expression := skipDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
+			if skipDirective.ExpressionIsVariable {
+				expression, _ = jsonparser.GetString(ctx.Variables, expression)
+			}
+			skipEffective = append(skipEffective, ctx.RuleEvaluate(ctx.Variables, expression))
+		}
+		if skip = !slices.Contains(skipEffective, false); skip {
+			return
+		}
+	}
+	if includeDirective := field.IncludeDirective; includeDirective.Defined {
+		var skipEffective []bool
+		if ifName := includeDirective.VariableName; len(ifName) > 0 {
+			include, includeErr := jsonparser.GetBoolean(ctx.Variables, ifName)
+			skipEffective = append(skipEffective, includeErr != nil || !include)
+		}
+		if expression := includeDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
+			if includeDirective.ExpressionIsVariable {
+				expression, _ = jsonparser.GetString(ctx.Variables, expression)
+			}
+			skipEffective = append(skipEffective, !ctx.RuleEvaluate(ctx.Variables, expression))
+		}
+		if skip = !slices.Contains(skipEffective, false); skip {
+			return
+		}
+	}
+	return
+}
+
 func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, objectBuf *BufPair) (err error) {
 	if len(object.Path) != 0 {
 		data, _, _, _ = jsonparser.Get(data, object.Path...)
@@ -1142,49 +1178,23 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
+	skipBufferFuncs := make(map[int][]func(*Context) bool)
 	skipBufferIds, skipFieldIndexes := make(map[int]bool), make(map[int]bool)
-	addSkipDataFunc := func(index int, skipEffective ...bool) bool {
-		if !slices.Contains(skipEffective, false) {
-			skipFieldIndexes[index] = true
-			if field := object.Fields[index]; field.HasBuffer {
-				skipBufferIds[field.BufferID] = true
-			}
-			return true
+	addSkipDataFunc := func(index int) {
+		skipFieldIndexes[index] = true
+		if field := object.Fields[index]; field.HasBuffer {
+			skipBufferIds[field.BufferID] = true
 		}
-		return false
 	}
 	for i := range object.Fields {
 		field := object.Fields[i]
-		if skipDirective := field.SkipDirective; skipDirective.Defined {
-			var skipEffective []bool
-			if ifName := skipDirective.VariableName; len(ifName) > 0 {
-				skip, skipErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-				skipEffective = append(skipEffective, skipErr == nil && skip)
-			}
-			if expression := skipDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
-				if skipDirective.ExpressionIsVariable {
-					expression, _ = jsonparser.GetString(ctx.Variables, expression)
-				}
-				skipEffective = append(skipEffective, ctx.RuleEvaluate(ctx.Variables, expression))
-			}
-			if addSkipDataFunc(i, skipEffective...) {
-				continue
-			}
+		if r.resolveSkipField(ctx, field) {
+			addSkipDataFunc(i)
 		}
-		if includeDirective := field.IncludeDirective; includeDirective.Defined {
-			var skipEffective []bool
-			if ifName := includeDirective.VariableName; len(ifName) > 0 {
-				include, includeErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-				skipEffective = append(skipEffective, includeErr != nil || !include)
-			}
-			if expression := includeDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
-				if includeDirective.ExpressionIsVariable {
-					expression, _ = jsonparser.GetString(ctx.Variables, expression)
-				}
-				skipEffective = append(skipEffective, !ctx.RuleEvaluate(ctx.Variables, expression))
-			}
-			if addSkipDataFunc(i, skipEffective...) {
-				continue
+		if field.HasBuffer {
+			skipBufferFuncs[field.BufferID] = append(skipBufferFuncs[field.BufferID], objectBuf.SkipFunc...)
+			if field.SkipDirective.Defined || field.IncludeDirective.Defined {
+				skipBufferFuncs[field.BufferID] = append(skipBufferFuncs[field.BufferID], func(_ctx *Context) bool { return r.resolveSkipField(_ctx, field) })
 			}
 		}
 	}
@@ -1194,8 +1204,10 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		set = r.getResultSet()
 		defer r.freeResultSet(set)
 		for bufId := range skipBufferIds {
-			set.buffers[bufId] = nil
+			delete(skipBufferFuncs, bufId)
 		}
+		set.buffersSkips = skipBufferIds
+		set.buffersSkipFuncs = skipBufferFuncs
 		err = r.resolveFetch(ctx, object.Fetch, data, set)
 		if err != nil {
 			return
@@ -1255,6 +1267,9 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		objectBuf.Data.WriteBytes(colon)
 		ctx.addPathElement(object.Fields[i].Name)
 		ctx.setPosition(object.Fields[i].Position)
+		if field := object.Fields[i]; field.HasBuffer {
+			fieldBuf.SkipFunc = skipBufferFuncs[field.BufferID]
+		}
 		err = r.resolveNode(ctx, object.Fields[i].Value, fieldData, fieldBuf)
 		ctx.removeLastPathElement()
 		ctx.responseElements = responseElements
@@ -1441,12 +1456,14 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 }
 
 func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (skip bool, err error) {
-	if _, skip = set.buffers[fetch.BufferId]; skip {
-		delete(set.buffers, fetch.BufferId)
+	if _, skip = set.buffersSkips[fetch.BufferId]; skip {
 		return
 	}
 	err = fetch.InputTemplate.Render(ctx, data, preparedInput)
 	buf := r.getBufPair()
+	if skipFunc, ok := set.buffersSkipFuncs[fetch.BufferId]; ok {
+		buf.SkipFunc = skipFunc
+	}
 	set.buffers[fetch.BufferId] = buf
 	return
 }
@@ -1551,7 +1568,9 @@ func (_ *Null) NodeKind() NodeKind {
 }
 
 type resultSet struct {
-	buffers map[int]*BufPair
+	buffers          map[int]*BufPair
+	buffersSkips     map[int]bool
+	buffersSkipFuncs map[int][]func(*Context) bool
 }
 
 type SingleFetch struct {
@@ -1709,8 +1728,9 @@ type GraphQLResponsePatch struct {
 }
 
 type BufPair struct {
-	Data   *fastbuffer.FastBuffer
-	Errors *fastbuffer.FastBuffer
+	Data     *fastbuffer.FastBuffer
+	Errors   *fastbuffer.FastBuffer
+	SkipFunc []func(*Context) bool
 }
 
 func NewBufPair() *BufPair {
@@ -1731,6 +1751,7 @@ func (b *BufPair) HasErrors() bool {
 func (b *BufPair) Reset() {
 	b.Data.Reset()
 	b.Errors.Reset()
+	b.SkipFunc = nil
 }
 
 func (b *BufPair) writeErrors(data []byte) {
@@ -1794,6 +1815,7 @@ func (r *Resolver) MergeBufPairData(from, to *BufPair, prefixDataWithComma bool)
 	}
 	to.Data.WriteBytes(from.Data.Bytes())
 	from.Data.Reset()
+	from.SkipFunc = nil
 }
 
 func (r *Resolver) MergeBufPairErrors(from, to *BufPair) {
@@ -1805,6 +1827,7 @@ func (r *Resolver) MergeBufPairErrors(from, to *BufPair) {
 	}
 	to.Errors.WriteBytes(from.Errors.Bytes())
 	from.Errors.Reset()
+	from.SkipFunc = nil
 }
 
 func (r *Resolver) freeBufPair(pair *BufPair) {
