@@ -5,7 +5,6 @@ package resolve
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"golang.org/x/exp/slices"
 	"io"
@@ -955,38 +954,29 @@ func (r *Resolver) resolveBoolean(ctx *Context, boolean *Boolean, data []byte, b
 	return nil
 }
 
-type queryRawResp struct {
-	PrismaType  string `json:"prisma__type"`
-	PrismaValue any    `json:"prisma__value"`
-}
-
 func handleQueryRawResp(value, data []byte) (result []byte) {
-	data, _, _, _ = jsonparser.Get(data, "queryRaw")
-	if data == nil {
-		return nil
-	}
-
-	var queryRaw []map[string]queryRawResp
-	err := json.Unmarshal(value, &queryRaw)
-	if err != nil {
+	if data, _, _, _ = jsonparser.Get(data, "queryRaw"); data == nil {
 		return
 	}
 
-	var normalArrayResp []map[string]any
-	for _, item := range queryRaw {
-		normalMap := make(map[string]any)
-		for k, v := range item {
-			normalMap[k] = v.PrismaValue
-		}
-		normalArrayResp = append(normalArrayResp, normalMap)
-	}
-	result, _ = json.Marshal(normalArrayResp)
+	itemObjectIndex, result := -1, value
+	_, _ = jsonparser.ArrayEach(value, func(itemObject []byte, _ jsonparser.ValueType, _ int, _ error) {
+		itemObjectIndex++
+		_ = jsonparser.ObjectEach(itemObject, func(key []byte, itemRaw []byte, _ jsonparser.ValueType, _ int) error {
+			itemRawValue, itemRawValueType, itemRawValueOffset, _ := jsonparser.Get(itemRaw, "prisma__value")
+			if itemRawValueType == jsonparser.String {
+				itemRawValue = itemRaw[itemRawValueOffset-len(itemRawValue)-2 : itemRawValueOffset]
+			}
+			itemObject, _ = jsonparser.Set(itemObject, itemRawValue, string(key))
+			return nil
+		})
+		result, _ = jsonparser.Set(result, itemObject, fmt.Sprintf("[%d]", itemObjectIndex))
+	})
 	return
 }
 
-func handleExecuteRawResp(value, data []byte) (result []byte) {
-	data, _, _, _ = jsonparser.Get(data, "executeRaw")
-	if data == nil {
+func handleExecuteRawResp(value, data []byte) []byte {
+	if data, _, _, _ = jsonparser.Get(data, "executeRaw"); data == nil {
 		return nil
 	}
 
