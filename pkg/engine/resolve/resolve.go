@@ -954,20 +954,46 @@ func (r *Resolver) resolveBoolean(ctx *Context, boolean *Boolean, data []byte, b
 	return nil
 }
 
-func handleQueryRawResp(value, data []byte) (result []byte) {
-	if data, _, _, _ = jsonparser.Get(data, "queryRaw"); data == nil {
+const (
+	prismaTypeKey  = "prisma__type"
+	prismaValueKey = "prisma__value"
+	queryRawKey    = "queryRaw"
+)
+
+type (
+	QueryRawType struct {
+		FieldIndex int
+		ValueTypes map[string]string
+	}
+	QueryRawResp struct{}
+)
+
+func handleQueryRawResp(ctx *Context, value, data []byte) (result []byte) {
+	if data, _, _, _ = jsonparser.Get(data, queryRawKey); data == nil {
 		return
 	}
 
+	var (
+		rawValueTypes         map[string]string
+		rawValueTypesRequired bool
+	)
+	if rawTypes, typesFound := ctx.Value(QueryRawResp{}).(map[string]*QueryRawType); typesFound {
+		if rawType, typeFound := rawTypes[getRawFieldPath(ctx)]; typeFound {
+			rawType.ValueTypes = make(map[string]string)
+			rawValueTypes, rawValueTypesRequired = rawType.ValueTypes, true
+		}
+	}
 	itemObjectIndex, result := -1, value
 	_, _ = jsonparser.ArrayEach(value, func(itemObject []byte, _ jsonparser.ValueType, _ int, _ error) {
 		itemObjectIndex++
 		_ = jsonparser.ObjectEach(itemObject, func(key []byte, itemRaw []byte, _ jsonparser.ValueType, _ int) error {
-			itemRawValue, itemRawValueType, itemRawValueOffset, _ := jsonparser.Get(itemRaw, "prisma__value")
-			if itemRawValueType == jsonparser.String {
-				itemRawValue = itemRaw[itemRawValueOffset-len(itemRawValue)-2 : itemRawValueOffset]
+			itemKey := string(key)
+			itemObject, _ = jsonparser.Set(itemObject, getValueBytes(itemRaw, prismaValueKey, true), itemKey)
+			if rawValueTypesRequired {
+				if prismaType, ok := rawValueTypes[itemKey]; !ok || prismaType == "null" {
+					rawValueTypes[itemKey] = string(getValueBytes(itemRaw, prismaTypeKey, false))
+				}
 			}
-			itemObject, _ = jsonparser.Set(itemObject, itemRawValue, string(key))
 			return nil
 		})
 		result, _ = jsonparser.Set(result, itemObject, fmt.Sprintf("[%d]", itemObjectIndex))
@@ -975,11 +1001,44 @@ func handleQueryRawResp(value, data []byte) (result []byte) {
 	return
 }
 
-func handleExecuteRawResp(value, data []byte) []byte {
-	if data, _, _, _ = jsonparser.Get(data, "executeRaw"); data == nil {
+func getRawFieldPath(ctx *Context) string {
+	buf := pool.BytesBuffer.Get()
+	defer pool.BytesBuffer.Put(buf)
+	for _, item := range ctx.pathElements {
+		buf.WriteString(string(item))
+		buf.Write(literal.DOT)
+	}
+	return buf.String()[:buf.Len()-1]
+}
+
+func getValueBytes(data []byte, key string, matchValueType bool) []byte {
+	value, valueType, offset, _ := jsonparser.Get(data, key)
+	if matchValueType && valueType == jsonparser.String {
+		value = data[offset-len(value)-2 : offset]
+	}
+	return value
+}
+
+const executeRawKey = "executeRaw"
+
+type (
+	ExecuteRawType struct {
+		FieldIndex int
+		ValueType  jsonparser.ValueType
+	}
+	ExecuteRawResp struct{}
+)
+
+func handleExecuteRawResp(ctx *Context, value, data []byte) []byte {
+	data, dataType, _, _ := jsonparser.Get(data, executeRawKey)
+	if data == nil {
 		return nil
 	}
-
+	if rawTypes, typesFound := ctx.Value(ExecuteRawResp{}).(map[string]*ExecuteRawType); typesFound {
+		if rawType, typeFound := rawTypes[getRawFieldPath(ctx)]; typeFound {
+			rawType.ValueType = dataType
+		}
+	}
 	return value
 }
 
@@ -1000,12 +1059,12 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 			}
 		}
 		if value != nil && valueType != jsonparser.Null {
-			if raw := handleQueryRawResp(value, data); raw != nil {
+			if raw := handleQueryRawResp(ctx, value, data); raw != nil {
 				stringBuf.Data.WriteBytes(raw)
 				return nil
 			}
 
-			if raw := handleExecuteRawResp(value, data); raw != nil {
+			if raw := handleExecuteRawResp(ctx, value, data); raw != nil {
 				stringBuf.Data.WriteBytes(raw)
 				return nil
 			}
@@ -1182,7 +1241,9 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			addSkipDataFunc(i)
 		}
 		if field.HasBuffer {
-			skipBufferFuncs[field.BufferID] = append(skipBufferFuncs[field.BufferID], objectBuf.SkipFunc...)
+			if len(objectBuf.SkipFunc) > 0 {
+				skipBufferFuncs[field.BufferID] = append(skipBufferFuncs[field.BufferID], objectBuf.SkipFunc...)
+			}
 			if field.SkipDirective.Defined || field.IncludeDirective.Defined {
 				skipBufferFuncs[field.BufferID] = append(skipBufferFuncs[field.BufferID], func(_ctx *Context) bool { return r.resolveSkipField(_ctx, field) })
 			}
