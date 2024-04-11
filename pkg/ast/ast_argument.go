@@ -22,6 +22,9 @@ type Argument struct {
 	Position         position.Position
 	PrintBeforeValue []byte
 	PrintAfterValue  []byte
+
+	HasOriginValue bool
+	OriginValue    Value
 }
 
 func (d *Document) CopyArgument(ref int) int {

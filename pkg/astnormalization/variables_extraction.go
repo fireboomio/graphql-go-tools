@@ -42,7 +42,8 @@ func (v *variablesExtractionVisitor) EnterArgument(ref int) {
 	if v.skip {
 		return
 	}
-	if v.operation.Arguments[ref].Value.Kind == ast.ValueKindVariable {
+	argumentValue := v.operation.Arguments[ref].Value
+	if argumentValue.Kind == ast.ValueKindVariable {
 		return
 	}
 	if len(v.Ancestors) == 0 || v.Ancestors[0].Kind != ast.NodeKindOperationDefinition {
@@ -60,14 +61,14 @@ func (v *variablesExtractionVisitor) EnterArgument(ref int) {
 		return
 	}
 
-	containsVariable := v.operation.ValueContainsVariable(v.operation.Arguments[ref].Value)
+	containsVariable := v.operation.ValueContainsVariable(argumentValue)
 	if containsVariable {
-		v.traverseValue(v.operation.Arguments[ref].Value, ref, inputValueDefinition)
+		v.traverseValue(argumentValue, ref, inputValueDefinition)
 		return
 	}
 
 	variableNameBytes := v.operation.GenerateUnusedVariableDefinitionName(v.Ancestors[0].Ref)
-	valueBytes, err := v.operation.ValueToJSON(v.operation.Arguments[ref].Value)
+	valueBytes, err := v.operation.ValueToJSON(argumentValue)
 	if err != nil {
 		return
 	}
@@ -86,6 +87,8 @@ func (v *variablesExtractionVisitor) EnterArgument(ref int) {
 
 	varRef := len(v.operation.VariableValues) - 1
 
+	v.operation.Arguments[ref].HasOriginValue = true
+	v.operation.Arguments[ref].OriginValue = argumentValue
 	v.operation.Arguments[ref].Value.Ref = varRef
 	v.operation.Arguments[ref].Value.Kind = ast.ValueKindVariable
 
@@ -176,6 +179,8 @@ func (v *variablesExtractionVisitor) extractObjectValue(objectField int, fieldVa
 
 	varRef := len(v.operation.VariableValues) - 1
 
+	v.operation.ObjectFields[objectField].HasOriginValue = true
+	v.operation.ObjectFields[objectField].OriginValue = fieldValue
 	v.operation.ObjectFields[objectField].Value.Kind = ast.ValueKindVariable
 	v.operation.ObjectFields[objectField].Value.Ref = varRef
 

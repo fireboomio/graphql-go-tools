@@ -15,6 +15,9 @@ type ObjectField struct {
 	Colon    position.Position  // :
 	Value    Value              // e.g. 12.43
 	Position position.Position
+
+	HasOriginValue bool
+	OriginValue    Value
 }
 
 func (d *Document) CopyObjectField(ref int) int {
