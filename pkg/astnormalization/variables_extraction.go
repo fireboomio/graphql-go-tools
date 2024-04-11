@@ -78,7 +78,8 @@ func (v *variablesExtractionVisitor) EnterArgument(ref int) {
 	}
 
 	variable := ast.VariableValue{
-		Name: v.operation.Input.AppendInputBytes(variableNameBytes),
+		Generated: true,
+		Name:      v.operation.Input.AppendInputBytes(variableNameBytes),
 	}
 
 	v.operation.VariableValues = append(v.operation.VariableValues, variable)
@@ -168,9 +169,9 @@ func (v *variablesExtractionVisitor) extractObjectValue(objectField int, fieldVa
 	}
 
 	variable := ast.VariableValue{
-		Name: v.operation.Input.AppendInputBytes(variableNameBytes),
+		Generated: true,
+		Name:      v.operation.Input.AppendInputBytes(variableNameBytes),
 	}
-
 	v.operation.VariableValues = append(v.operation.VariableValues, variable)
 
 	varRef := len(v.operation.VariableValues) - 1

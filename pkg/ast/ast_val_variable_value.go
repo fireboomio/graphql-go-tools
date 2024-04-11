@@ -13,6 +13,8 @@ import (
 type VariableValue struct {
 	Dollar position.Position  // $
 	Name   ByteSliceReference // e.g. devicePicSize
+
+	Generated bool
 }
 
 func (d *Document) CopyVariableValue(ref int) int {
