@@ -11,9 +11,8 @@ import (
 // example:
 // $devicePicSize
 type VariableValue struct {
-	Dollar position.Position  // $
-	Name   ByteSliceReference // e.g. devicePicSize
-
+	Dollar    position.Position  // $
+	Name      ByteSliceReference // e.g. devicePicSize
 	Generated bool
 }
 

@@ -477,8 +477,9 @@ func (c *CSVVariableRenderer) RenderVariable(_ context.Context, data []byte, out
 }
 
 type ContextVariable struct {
-	Path     []string
-	Renderer VariableRenderer
+	Path      []string
+	Renderer  VariableRenderer
+	Generated bool
 }
 
 func (c *ContextVariable) TemplateSegment() TemplateSegment {
@@ -486,6 +487,7 @@ func (c *ContextVariable) TemplateSegment() TemplateSegment {
 		SegmentType:        VariableSegmentType,
 		VariableKind:       ContextVariableKind,
 		VariableSourcePath: c.Path,
+		VariableGenerated:  c.Generated,
 		Renderer:           c.Renderer,
 	}
 }

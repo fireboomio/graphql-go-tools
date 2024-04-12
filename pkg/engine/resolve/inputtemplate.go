@@ -24,6 +24,7 @@ type TemplateSegment struct {
 	Data               []byte
 	VariableKind       VariableKind
 	VariableSourcePath []string
+	VariableGenerated  bool
 	Renderer           VariableRenderer
 }
 
@@ -107,7 +108,7 @@ func (i *InputTemplate) renderObjectVariable(ctx context.Context, variables []by
 func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegment, preparedInput *fastbuffer.FastBuffer, undefinedVariables *[]string, staticData []byte) (bool, error) {
 	value, valueType, offset, err := jsonparser.Get(ctx.Variables, segment.VariableSourcePath...)
 	if err != nil || valueType == jsonparser.Null {
-		if err == jsonparser.KeyPathNotFoundError {
+		if errors.Is(err, jsonparser.KeyPathNotFoundError) {
 			*undefinedVariables = append(*undefinedVariables, segment.VariableSourcePath[0])
 			if before, ok := literal.CutBeforeSet(preparedInput.Bytes(), staticData); ok {
 				preparedInput.Reset()
@@ -117,8 +118,8 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 			}
 		}
 
-		if valueType == jsonparser.Null && len(segment.VariableSourcePath[0]) == 1 {
-			// isVirtualParam
+		if valueType == jsonparser.Null && segment.VariableGenerated {
+			// isGeneratedVariable
 			cutBytes := preparedInput.Bytes()[:preparedInput.Len()-1]
 			preparedInput.Reset()
 			preparedInput.WriteBytes(cutBytes)

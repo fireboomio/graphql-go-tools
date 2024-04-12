@@ -129,6 +129,7 @@ func (p *Planner) addDirectiveToNode(directiveRef int, node ast.Node) {
 	// operation.
 	for _, value := range variables {
 		variableName := p.visitor.Operation.VariableValueNameBytes(value.Ref)
+		variableGenerated := p.visitor.Operation.VariableValues[value.Ref].Generated
 
 		for _, i := range p.visitor.Operation.OperationDefinitions[p.visitor.Walker.Ancestors[0].Ref].VariableDefinitions.Refs {
 			// Find the variable declaration in the downstream operation.
@@ -147,8 +148,9 @@ func (p *Planner) addDirectiveToNode(directiveRef int, node ast.Node) {
 			}
 
 			contextVariable := &resolve.ContextVariable{
-				Path:     []string{string(variableName)},
-				Renderer: renderer,
+				Path:      []string{string(variableName)},
+				Renderer:  renderer,
+				Generated: variableGenerated,
 			}
 
 			// Try to add the variable to the set of upstream variables.
@@ -870,8 +872,9 @@ func (p *Planner) configureFieldArgumentSource(upstreamFieldRef, downstreamField
 	}
 
 	contextVariable := &resolve.ContextVariable{
-		Path:     []string{variableNameStr},
-		Renderer: renderer,
+		Path:      []string{variableNameStr},
+		Renderer:  renderer,
+		Generated: p.visitor.Operation.VariableValues[value.Ref].Generated,
 	}
 
 	contextVariableName, exists := p.variables.AddVariable(contextVariable)
@@ -975,7 +978,8 @@ func (p *Planner) addVariableDefinitionsRecursively(value ast.Value, sourcePath 
 	variableDefinitionTypeName = p.visitor.Config.Types.RenameTypeNameOnMatchStr(variableDefinitionTypeName)
 
 	contextVariable := &resolve.ContextVariable{
-		Path: append(sourcePath, variableNameStr),
+		Path:      append(sourcePath, variableNameStr),
+		Generated: p.visitor.Operation.VariableValues[value.Ref].Generated,
 	}
 	renderer, err := resolve.NewJSONVariableRendererWithValidationFromTypeRef(p.visitor.Operation, p.visitor.Definition, variableDefinitionTypeRef)
 	if err != nil {
