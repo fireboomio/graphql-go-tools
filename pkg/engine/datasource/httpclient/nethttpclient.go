@@ -150,24 +150,30 @@ func respBodyReader(req *http.Request, resp *http.Response) (io.ReadCloser, erro
 
 const (
 	wgKey            = "__wg"
-	UserKey          = "user"
-	ClientRequestKey = "__wg_clientRequest"
+	userKey          = "user"
+	userBytesKey     = "userBytes"
+	clientRequestKey = "__wg_clientRequest"
 
 	startTraceRequestKey   = "StartTraceRequest"
 	spanWithLogResponseKey = "SpanWithLogResponse"
 )
 
 var (
-	wgUserKey                 = []string{wgKey, UserKey}
+	wgUserKey                 = []string{wgKey, userKey}
 	wgClientRequestHeadersKey = []string{wgKey, "clientRequest", "headers"}
 )
 
 func SetUserValue(ctx context.Context, input []byte) []byte {
-	if user := ctx.Value(UserKey); user != nil {
-		userJson, _ := json.Marshal(user)
+	var userJson []byte
+	userJson, ok := ctx.Value(userBytesKey).([]byte)
+	if user := ctx.Value(userKey); user != nil && !ok {
+		userJson, _ = json.Marshal(user)
+	}
+	if userJson != nil {
 		input, _ = jsonparser.Set(input, userJson, wgUserKey...)
 	}
-	if clientRequest, ok := ctx.Value(ClientRequestKey).(*http.Request); ok {
+
+	if clientRequest, ok := ctx.Value(clientRequestKey).(*http.Request); ok {
 		headers := make(map[string]string)
 		for k, v := range clientRequest.Header {
 			headers[k] = strings.Join(v, ",")
