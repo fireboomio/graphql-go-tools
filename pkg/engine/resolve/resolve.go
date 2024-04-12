@@ -1094,14 +1094,15 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 		}
 
 		stringBuf.Data.WriteBytes(value)
-		r.exportField(ctx, str.Export, value, literal.ZeroArrayValue, literal.ZeroObjectValue, literal.ZeroStringValue)
+		r.exportField(ctx, str.Export, value, literal.ZeroArrayValue, literal.ZeroObjectValue, literal.ZeroStringWithQuoteValue)
 		return nil
 	}
 
 	value = r.renameTypeName(ctx, str, value)
-	value = append(literal.QUOTE, append(value, literal.QUOTE...)...)
 
+	stringBuf.Data.WriteBytes(quote)
 	stringBuf.Data.WriteBytes(value)
+	stringBuf.Data.WriteBytes(quote)
 	r.exportField(ctx, str.Export, value, literal.ZeroStringValue)
 	return nil
 }

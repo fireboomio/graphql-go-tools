@@ -137,10 +137,11 @@ var (
 var IfRule = []byte("ifRule")
 
 var (
-	ZeroArrayValue  = []byte("[]")
-	ZeroObjectValue = []byte("{}")
-	ZeroStringValue = []byte(`""`)
-	ZeroNumberValue = []byte("0")
+	ZeroArrayValue           = []byte("[]")
+	ZeroObjectValue          = []byte("{}")
+	ZeroStringValue          = []byte("")
+	ZeroStringWithQuoteValue = []byte(`""`)
+	ZeroNumberValue          = []byte("0")
 )
 
 type Literal []byte
