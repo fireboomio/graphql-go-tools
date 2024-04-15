@@ -1063,7 +1063,7 @@ func (v *Visitor) resolveInputTemplates(config objectFetchConfiguration, input *
 
 			variable := &resolve.ContextVariable{
 				Path:      variablePath,
-				Generated: v.Operation.VariableValues[value.Ref].Generated,
+				Generated: v.Operation.VariableValueIsGenerated(value.Ref),
 			}
 
 			if fieldConfig, ok := v.fieldConfigs[config.fieldRef]; ok {
@@ -1167,7 +1167,7 @@ func (v *Visitor) renderJSONValueTemplate(value ast.Value, variables *resolve.Va
 		variableName, _ := variables.AddVariable(&resolve.ContextVariable{
 			Path:      []string{variablePath},
 			Renderer:  renderer,
-			Generated: v.Operation.VariableValues[value.Ref].Generated,
+			Generated: v.Operation.VariableValueIsGenerated(value.Ref),
 		})
 		out += variableName
 	}

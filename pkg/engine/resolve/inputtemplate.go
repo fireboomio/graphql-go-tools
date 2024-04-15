@@ -25,6 +25,7 @@ type TemplateSegment struct {
 	VariableKind       VariableKind
 	VariableSourcePath []string
 	VariableGenerated  bool
+	VariableNullable   bool
 	Renderer           VariableRenderer
 }
 
@@ -36,31 +37,35 @@ type InputTemplate struct {
 	SetTemplateOutputToNullOnVariableNull bool
 }
 
+const unrenderVariableKey = "unrender_variables"
+
+type UnrenderVariable struct {
+	Nullable   bool
+	Generated  bool
+	ValueIndex int
+	ValueType  jsonparser.ValueType
+}
+
+func GetUnrenderVariables(ctx context.Context) (map[string]*UnrenderVariable, bool) {
+	unrenderVariables, ok := ctx.Value(unrenderVariableKey).(map[string]*UnrenderVariable)
+	return unrenderVariables, ok
+}
+
 var setTemplateOutputNull = errors.New("set to null")
 
 func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuffer.FastBuffer) (err error) {
-	undefinedVariables := make([]string, 0)
+	undefinedVariables, unrenderVariables := make([]string, 0), make(map[string]*UnrenderVariable)
 
-	var offset bool
-	var staticData []byte
 	for j := range i.Segments {
 		switch i.Segments[j].SegmentType {
 		case StaticSegmentType:
-			staticData = i.Segments[j].Data
-			if offset && len(staticData) > 1 {
-				offset = false
-				staticData = staticData[1:]
-				if staticData[0] == ',' {
-					staticData = staticData[1:]
-				}
-			}
-			preparedInput.WriteBytes(staticData)
+			preparedInput.WriteBytes(i.Segments[j].Data)
 		case VariableSegmentType:
 			switch i.Segments[j].VariableKind {
 			case ObjectVariableKind:
 				err = i.renderObjectVariable(ctx, data, i.Segments[j], preparedInput)
 			case ContextVariableKind:
-				offset, err = i.renderContextVariable(ctx, i.Segments[j], preparedInput, &undefinedVariables, staticData)
+				err = i.renderContextVariable(ctx, i.Segments[j], preparedInput, &undefinedVariables, unrenderVariables)
 			case HeaderVariableKind:
 				err = i.renderHeaderVariable(ctx, i.Segments[j].VariableSourcePath, preparedInput)
 			default:
@@ -79,6 +84,9 @@ func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuf
 
 	if len(undefinedVariables) > 0 {
 		ctx.Context = httpclient.CtxSetUndefinedVariables(ctx.Context, undefinedVariables)
+	}
+	if len(unrenderVariables) > 0 {
+		ctx.Context = context.WithValue(ctx.Context, unrenderVariableKey, unrenderVariables)
 	}
 
 	return
@@ -105,28 +113,22 @@ func (i *InputTemplate) renderObjectVariable(ctx context.Context, variables []by
 	return segment.Renderer.RenderVariable(ctx, value, preparedInput)
 }
 
-func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegment, preparedInput *fastbuffer.FastBuffer, undefinedVariables *[]string, staticData []byte) (bool, error) {
+func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegment, preparedInput *fastbuffer.FastBuffer,
+	undefinedVariables *[]string, unrenderVariables map[string]*UnrenderVariable) error {
 	value, valueType, offset, err := jsonparser.Get(ctx.Variables, segment.VariableSourcePath...)
 	if err != nil || valueType == jsonparser.Null {
+		variableName := segment.VariableSourcePath[0]
+		unrenderVariables[variableName] = &UnrenderVariable{
+			Nullable:   segment.VariableNullable,
+			Generated:  segment.VariableGenerated,
+			ValueIndex: preparedInput.Len(),
+			ValueType:  valueType,
+		}
 		if errors.Is(err, jsonparser.KeyPathNotFoundError) {
 			*undefinedVariables = append(*undefinedVariables, segment.VariableSourcePath[0])
-			if before, ok := literal.CutBeforeSet(preparedInput.Bytes(), staticData); ok {
-				preparedInput.Reset()
-				preparedInput.WriteBytes(before)
-				preparedInput.WriteBytes(literal.NULL)
-				return true, nil
-			}
 		}
-
-		if valueType == jsonparser.Null && segment.VariableGenerated {
-			// isGeneratedVariable
-			cutBytes := preparedInput.Bytes()[:preparedInput.Len()-1]
-			preparedInput.Reset()
-			preparedInput.WriteBytes(cutBytes)
-		}
-
 		preparedInput.WriteBytes(literal.NULL)
-		return false, nil
+		return nil
 	}
 	if valueType == jsonparser.String {
 		value = ctx.Variables[offset-len(value)-2 : offset]
@@ -137,7 +139,7 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 			}
 		}
 	}
-	return false, segment.Renderer.RenderVariable(ctx, value, preparedInput)
+	return segment.Renderer.RenderVariable(ctx, value, preparedInput)
 }
 
 func (i *InputTemplate) renderHeaderVariable(ctx *Context, path []string, preparedInput *fastbuffer.FastBuffer) error {

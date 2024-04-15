@@ -480,6 +480,7 @@ type ContextVariable struct {
 	Path      []string
 	Renderer  VariableRenderer
 	Generated bool
+	Nullable  bool
 }
 
 func (c *ContextVariable) TemplateSegment() TemplateSegment {
@@ -488,6 +489,7 @@ func (c *ContextVariable) TemplateSegment() TemplateSegment {
 		VariableKind:       ContextVariableKind,
 		VariableSourcePath: c.Path,
 		VariableGenerated:  c.Generated,
+		VariableNullable:   c.Nullable,
 		Renderer:           c.Renderer,
 	}
 }

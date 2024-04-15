@@ -34,6 +34,10 @@ func (d *Document) VariableValuesAreEqual(left, right int) bool {
 	return bytes.Equal(d.VariableValueNameBytes(left), d.VariableValueNameBytes(right))
 }
 
+func (d *Document) VariableValueIsGenerated(ref int) bool {
+	return d.VariableValues[ref].Generated
+}
+
 func (d *Document) AddVariableValue(value VariableValue) (ref int) {
 	d.VariableValues = append(d.VariableValues, value)
 	return len(d.VariableValues) - 1

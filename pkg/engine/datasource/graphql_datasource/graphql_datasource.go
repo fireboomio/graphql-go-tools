@@ -129,7 +129,7 @@ func (p *Planner) addDirectiveToNode(directiveRef int, node ast.Node) {
 	// operation.
 	for _, value := range variables {
 		variableName := p.visitor.Operation.VariableValueNameBytes(value.Ref)
-		variableGenerated := p.visitor.Operation.VariableValues[value.Ref].Generated
+		variableGenerated := p.visitor.Operation.VariableValueIsGenerated(value.Ref)
 
 		for _, i := range p.visitor.Operation.OperationDefinitions[p.visitor.Walker.Ancestors[0].Ref].VariableDefinitions.Refs {
 			// Find the variable declaration in the downstream operation.
@@ -874,7 +874,7 @@ func (p *Planner) configureFieldArgumentSource(upstreamFieldRef, downstreamField
 	contextVariable := &resolve.ContextVariable{
 		Path:      []string{variableNameStr},
 		Renderer:  renderer,
-		Generated: p.visitor.Operation.VariableValues[value.Ref].Generated,
+		Generated: p.visitor.Operation.VariableValueIsGenerated(value.Ref),
 	}
 
 	contextVariableName, exists := p.variables.AddVariable(contextVariable)
@@ -979,7 +979,7 @@ func (p *Planner) addVariableDefinitionsRecursively(value ast.Value, sourcePath 
 
 	contextVariable := &resolve.ContextVariable{
 		Path:      append(sourcePath, variableNameStr),
-		Generated: p.visitor.Operation.VariableValues[value.Ref].Generated,
+		Generated: p.visitor.Operation.VariableValueIsGenerated(value.Ref),
 	}
 	renderer, err := resolve.NewJSONVariableRendererWithValidationFromTypeRef(p.visitor.Operation, p.visitor.Definition, variableDefinitionTypeRef)
 	if err != nil {
