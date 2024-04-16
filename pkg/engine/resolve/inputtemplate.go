@@ -37,24 +37,25 @@ type InputTemplate struct {
 	SetTemplateOutputToNullOnVariableNull bool
 }
 
-const unrenderVariableKey = "unrender_variables"
+const unrenderVariableKeyFormat = "unrender_variables(%s)"
 
 type UnrenderVariable struct {
+	Name       string
 	Nullable   bool
 	Generated  bool
 	ValueIndex int
 	ValueType  jsonparser.ValueType
 }
 
-func GetUnrenderVariables(ctx context.Context) (map[string]*UnrenderVariable, bool) {
-	unrenderVariables, ok := ctx.Value(unrenderVariableKey).(map[string]*UnrenderVariable)
+func GetUnrenderVariables(ctx context.Context, preparedInputBytes []byte) ([]UnrenderVariable, bool) {
+	unrenderVariables, ok := ctx.Value(fmt.Sprintf(unrenderVariableKeyFormat, string(preparedInputBytes))).([]UnrenderVariable)
 	return unrenderVariables, ok
 }
 
 var setTemplateOutputNull = errors.New("set to null")
 
 func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuffer.FastBuffer) (err error) {
-	undefinedVariables, unrenderVariables := make([]string, 0), make(map[string]*UnrenderVariable)
+	undefinedVariables, unrenderVariables := make([]string, 0), make([]UnrenderVariable, 0)
 
 	for j := range i.Segments {
 		switch i.Segments[j].SegmentType {
@@ -65,7 +66,7 @@ func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuf
 			case ObjectVariableKind:
 				err = i.renderObjectVariable(ctx, data, i.Segments[j], preparedInput)
 			case ContextVariableKind:
-				err = i.renderContextVariable(ctx, i.Segments[j], preparedInput, &undefinedVariables, unrenderVariables)
+				err = i.renderContextVariable(ctx, i.Segments[j], preparedInput, &undefinedVariables, &unrenderVariables)
 			case HeaderVariableKind:
 				err = i.renderHeaderVariable(ctx, i.Segments[j].VariableSourcePath, preparedInput)
 			default:
@@ -86,7 +87,7 @@ func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuf
 		ctx.Context = httpclient.CtxSetUndefinedVariables(ctx.Context, undefinedVariables)
 	}
 	if len(unrenderVariables) > 0 {
-		ctx.Context = context.WithValue(ctx.Context, unrenderVariableKey, unrenderVariables)
+		ctx.Context = context.WithValue(ctx.Context, fmt.Sprintf(unrenderVariableKeyFormat, preparedInput.String()), unrenderVariables)
 	}
 
 	return
@@ -114,16 +115,16 @@ func (i *InputTemplate) renderObjectVariable(ctx context.Context, variables []by
 }
 
 func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegment, preparedInput *fastbuffer.FastBuffer,
-	undefinedVariables *[]string, unrenderVariables map[string]*UnrenderVariable) error {
+	undefinedVariables *[]string, unrenderVariables *[]UnrenderVariable) error {
 	value, valueType, offset, err := jsonparser.Get(ctx.Variables, segment.VariableSourcePath...)
 	if err != nil || valueType == jsonparser.Null {
-		variableName := segment.VariableSourcePath[0]
-		unrenderVariables[variableName] = &UnrenderVariable{
+		*unrenderVariables = append(*unrenderVariables, UnrenderVariable{
+			Name:       segment.VariableSourcePath[0],
 			Nullable:   segment.VariableNullable,
 			Generated:  segment.VariableGenerated,
 			ValueIndex: preparedInput.Len(),
 			ValueType:  valueType,
-		}
+		})
 		if errors.Is(err, jsonparser.KeyPathNotFoundError) {
 			*undefinedVariables = append(*undefinedVariables, segment.VariableSourcePath[0])
 		}

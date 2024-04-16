@@ -6,12 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"io"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/exp/slices"
 
 	"github.com/buger/jsonparser"
 	"github.com/cespare/xxhash/v2"
@@ -1441,7 +1442,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	preparedInputs := r.getBufPairSlice()
 	defer r.freeBufPairSlice(preparedInputs)
 
-	resolvers := make([]func() error, 0, len(fetch.Fetches))
+	resolvers := make(map[*BufPair]func() error, len(fetch.Fetches))
 
 	wg := r.getWaitGroup()
 	defer r.freeWaitGroup(wg)
@@ -1464,9 +1465,9 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 			}
 
 			buf := set.buffers[f.BufferId]
-			resolvers = append(resolvers, func() error {
+			resolvers[buf] = func() error {
 				return r.resolveSingleFetch(ctx, f, preparedInput.Data, buf)
-			})
+			}
 			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
 			preparedInput := r.getBufPair()
@@ -1481,24 +1482,26 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 			}
 
 			buf := set.buffers[f.Fetch.BufferId]
-			resolvers = append(resolvers, func() error {
+			resolvers[buf] = func() error {
 				return r.resolveBatchFetch(ctx, f, preparedInput.Data, buf)
-			})
+			}
 			disallowParallelFetch = disallowParallelFetch || f.Fetch.DisallowParallelFetch
 		}
 	}
 
-	for _, resolver := range resolvers {
+	for bufPair, resolver := range resolvers {
 		if disallowParallelFetch {
 			if err = resolver(); err != nil {
 				return err
 			}
 			wg.Done()
 		} else {
-			go func(r func() error) {
-				_ = r()
+			go func(b *BufPair, r func() error) {
+				if err = r(); err != nil {
+					b.WriteErr([]byte(err.Error()), nil, nil, nil)
+				}
 				wg.Done()
-			}(resolver)
+			}(bufPair, resolver)
 		}
 	}
 
