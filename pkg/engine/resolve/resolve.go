@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -179,6 +180,7 @@ func (c *Context) Clone() Context {
 	}
 	return Context{
 		Context:         c.Context,
+		RuleEvaluate:    c.RuleEvaluate,
 		Variables:       variables,
 		Request:         c.Request,
 		pathElements:    pathElements,
@@ -187,14 +189,17 @@ func (c *Context) Clone() Context {
 		currentPatch:    c.currentPatch,
 		maxPatch:        c.maxPatch,
 		pathPrefix:      pathPrefix,
+		dataLoader:      c.dataLoader,
 		beforeFetchHook: c.beforeFetchHook,
 		afterFetchHook:  c.afterFetchHook,
 		position:        c.position,
+		RenameTypeNames: c.RenameTypeNames,
 	}
 }
 
 func (c *Context) Free() {
 	c.Context = nil
+	c.RuleEvaluate = nil
 	c.Variables = c.Variables[:0]
 	c.pathPrefix = c.pathPrefix[:0]
 	c.pathElements = c.pathElements[:0]
@@ -1204,6 +1209,30 @@ func (r *Resolver) resolveSkipField(ctx *Context, field *Field) (skip bool) {
 	return
 }
 
+func (r *Resolver) resolveSkipFieldExportRequired(ctx *Context, exportedVariables []string, skipDirectives ...SkipDirective) (required, defined bool) {
+	if defined = slices.ContainsFunc(skipDirectives, func(directive SkipDirective) bool { return directive.Defined }); !defined {
+		return
+	}
+
+	required = slices.ContainsFunc(skipDirectives, func(directive SkipDirective) bool {
+		return directive.Defined && slices.ContainsFunc(exportedVariables, func(exported string) bool {
+			if len(directive.VariableName) > 0 && directive.VariableName == exported {
+				return true
+			}
+			if expression := directive.Expression; len(expression) > 0 {
+				if directive.ExpressionIsVariable {
+					expression, _ = jsonparser.GetString(ctx.Variables, expression)
+				}
+				if strings.Contains(expression, fmt.Sprintf("arguments.%s", exported)) {
+					return true
+				}
+			}
+			return false
+		})
+	})
+	return
+}
+
 func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, objectBuf *BufPair) (err error) {
 	if len(object.Path) != 0 {
 		data, _, _, _ = jsonparser.Get(data, object.Path...)
@@ -1229,7 +1258,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
-	skipBufferFuncs := make(map[int][]func(*Context) bool)
+	skipFieldFuncs := make(map[int]func(*Context) bool)
 	skipBufferIds, skipFieldIndexes := make(map[int]bool), make(map[int]bool)
 	addSkipDataFunc := func(index int) {
 		skipFieldIndexes[index] = true
@@ -1237,18 +1266,24 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			skipBufferIds[field.BufferID] = true
 		}
 	}
+	var exportedVariables []string
 	for i := range object.Fields {
 		field := object.Fields[i]
+		if export, ok := field.Value.(NodeExport); ok {
+			if fieldExport := export.FieldExport(); fieldExport != nil {
+				exportedVariables = append(exportedVariables, fieldExport.Path[0])
+			}
+		}
+		exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, field.SkipDirective, SkipDirective(field.IncludeDirective))
+		if !skipDefined {
+			continue
+		}
+		if exportRequired {
+			skipFieldFuncs[i] = func(_ctx *Context) bool { return r.resolveSkipField(_ctx, field) }
+			continue
+		}
 		if r.resolveSkipField(ctx, field) {
 			addSkipDataFunc(i)
-		}
-		if field.HasBuffer {
-			if len(objectBuf.SkipFunc) > 0 {
-				skipBufferFuncs[field.BufferID] = append(skipBufferFuncs[field.BufferID], objectBuf.SkipFunc...)
-			}
-			if field.SkipDirective.Defined || field.IncludeDirective.Defined {
-				skipBufferFuncs[field.BufferID] = append(skipBufferFuncs[field.BufferID], func(_ctx *Context) bool { return r.resolveSkipField(_ctx, field) })
-			}
 		}
 	}
 
@@ -1256,11 +1291,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	if object.Fetch != nil {
 		set = r.getResultSet()
 		defer r.freeResultSet(set)
-		for bufId := range skipBufferIds {
-			delete(skipBufferFuncs, bufId)
-		}
 		set.buffersSkips = skipBufferIds
-		set.buffersSkipFuncs = skipBufferFuncs
 		err = r.resolveFetch(ctx, object.Fetch, data, set)
 		if err != nil {
 			return
@@ -1281,6 +1312,10 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	skipCount := 0
 	for i := range object.Fields {
 		if _, ok := skipFieldIndexes[i]; ok {
+			skipCount++
+			continue
+		}
+		if skipFunc, ok := skipFieldFuncs[i]; ok && skipFunc(ctx) {
 			skipCount++
 			continue
 		}
@@ -1320,9 +1355,6 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		objectBuf.Data.WriteBytes(colon)
 		ctx.addPathElement(object.Fields[i].Name)
 		ctx.setPosition(object.Fields[i].Position)
-		if field := object.Fields[i]; field.HasBuffer {
-			fieldBuf.SkipFunc = skipBufferFuncs[field.BufferID]
-		}
 		err = r.resolveNode(ctx, object.Fields[i].Value, fieldData, fieldBuf)
 		ctx.removeLastPathElement()
 		ctx.responseElements = responseElements
@@ -1516,9 +1548,6 @@ func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []b
 	}
 	err = fetch.InputTemplate.Render(ctx, data, preparedInput)
 	buf := r.getBufPair()
-	if skipFunc, ok := set.buffersSkipFuncs[fetch.BufferId]; ok {
-		buf.SkipFunc = skipFunc
-	}
 	set.buffers[fetch.BufferId] = buf
 	return
 }
@@ -1623,9 +1652,8 @@ func (_ *Null) NodeKind() NodeKind {
 }
 
 type resultSet struct {
-	buffers          map[int]*BufPair
-	buffersSkips     map[int]bool
-	buffersSkipFuncs map[int][]func(*Context) bool
+	buffers      map[int]*BufPair
+	buffersSkips map[int]bool
 }
 
 type SingleFetch struct {
@@ -1684,6 +1712,10 @@ type FieldExport struct {
 	AsBoolean bool
 }
 
+type NodeExport interface {
+	FieldExport() *FieldExport
+}
+
 type String struct {
 	Path                 []string
 	Nullable             bool
@@ -1696,6 +1728,10 @@ func (_ *String) NodeKind() NodeKind {
 	return NodeKindString
 }
 
+func (s *String) FieldExport() *FieldExport {
+	return s.Export
+}
+
 type Boolean struct {
 	Path     []string
 	Nullable bool
@@ -1704,6 +1740,10 @@ type Boolean struct {
 
 func (_ *Boolean) NodeKind() NodeKind {
 	return NodeKindBoolean
+}
+
+func (b *Boolean) FieldExport() *FieldExport {
+	return b.Export
 }
 
 type Float struct {
@@ -1716,6 +1756,10 @@ func (_ *Float) NodeKind() NodeKind {
 	return NodeKindFloat
 }
 
+func (f *Float) FieldExport() *FieldExport {
+	return f.Export
+}
+
 type Integer struct {
 	Path     []string
 	Nullable bool
@@ -1724,6 +1768,10 @@ type Integer struct {
 
 func (_ *Integer) NodeKind() NodeKind {
 	return NodeKindInteger
+}
+
+func (i *Integer) FieldExport() *FieldExport {
+	return i.Export
 }
 
 type Array struct {
@@ -1742,6 +1790,13 @@ type Stream struct {
 
 func (_ *Array) NodeKind() NodeKind {
 	return NodeKindArray
+}
+
+func (a *Array) FieldExport() *FieldExport {
+	if itemExport, ok := a.Item.(NodeExport); ok {
+		return itemExport.FieldExport()
+	}
+	return nil
 }
 
 type GraphQLSubscription struct {
@@ -1783,9 +1838,8 @@ type GraphQLResponsePatch struct {
 }
 
 type BufPair struct {
-	Data     *fastbuffer.FastBuffer
-	Errors   *fastbuffer.FastBuffer
-	SkipFunc []func(*Context) bool
+	Data   *fastbuffer.FastBuffer
+	Errors *fastbuffer.FastBuffer
 }
 
 func NewBufPair() *BufPair {
@@ -1806,7 +1860,6 @@ func (b *BufPair) HasErrors() bool {
 func (b *BufPair) Reset() {
 	b.Data.Reset()
 	b.Errors.Reset()
-	b.SkipFunc = nil
 }
 
 func (b *BufPair) writeErrors(data []byte) {
@@ -1870,7 +1923,6 @@ func (r *Resolver) MergeBufPairData(from, to *BufPair, prefixDataWithComma bool)
 	}
 	to.Data.WriteBytes(from.Data.Bytes())
 	from.Data.Reset()
-	from.SkipFunc = nil
 }
 
 func (r *Resolver) MergeBufPairErrors(from, to *BufPair) {
@@ -1882,7 +1934,6 @@ func (r *Resolver) MergeBufPairErrors(from, to *BufPair) {
 	}
 	to.Errors.WriteBytes(from.Errors.Bytes())
 	from.Errors.Reset()
-	from.SkipFunc = nil
 }
 
 func (r *Resolver) freeBufPair(pair *BufPair) {

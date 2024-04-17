@@ -1,7 +1,6 @@
 package resolve
 
 import (
-	"golang.org/x/exp/slices"
 	"hash"
 	"sync"
 
@@ -49,10 +48,6 @@ func NewFetcher(enableSingleFlightLoader bool) *Fetcher {
 }
 
 func (f *Fetcher) Fetch(ctx *Context, fetch *SingleFetch, preparedInput *fastbuffer.FastBuffer, buf *BufPair) (err error) {
-	if slices.ContainsFunc(buf.SkipFunc, func(skipFunc func(*Context) bool) bool { return skipFunc(ctx) }) {
-		return
-	}
-
 	dataBuf := pool.BytesBuffer.Get()
 	defer pool.BytesBuffer.Put(dataBuf)
 

@@ -754,6 +754,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 			return &resolve.String{
 				Path:                 path,
 				Nullable:             nullable,
+				Export:               v.resolveFieldExport(fieldRef),
 				UnescapeResponseJson: unescapeResponseJson,
 			}
 		case ast.NodeKindObjectTypeDefinition, ast.NodeKindInterfaceTypeDefinition, ast.NodeKindUnionTypeDefinition:
