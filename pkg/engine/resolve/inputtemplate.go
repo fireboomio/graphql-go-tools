@@ -45,6 +45,7 @@ type UnrenderVariable struct {
 	Generated  bool
 	ValueIndex int
 	ValueType  jsonparser.ValueType
+	Renderer   VariableRenderer
 }
 
 func GetUnrenderVariables(ctx context.Context, preparedInputBytes []byte) ([]UnrenderVariable, bool) {
@@ -124,6 +125,7 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 			Generated:  segment.VariableGenerated,
 			ValueIndex: preparedInput.Len(),
 			ValueType:  valueType,
+			Renderer:   segment.Renderer,
 		})
 		if errors.Is(err, jsonparser.KeyPathNotFoundError) {
 			*undefinedVariables = append(*undefinedVariables, segment.VariableSourcePath[0])
