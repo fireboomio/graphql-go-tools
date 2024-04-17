@@ -1269,10 +1269,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	var exportedVariables []string
 	for i := range object.Fields {
 		field := object.Fields[i]
-		if export, ok := field.Value.(NodeExport); ok {
-			if fieldExport := export.FieldExport(); fieldExport != nil {
-				exportedVariables = append(exportedVariables, fieldExport.Path[0])
-			}
+		if export, ok := field.Value.(FieldExportVariable); ok {
+			exportedVariables = append(exportedVariables, export.ExportedVariables()...)
 		}
 		exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, field.SkipDirective, SkipDirective(field.IncludeDirective))
 		if !skipDefined {
@@ -1583,6 +1581,15 @@ func (_ *Object) NodeKind() NodeKind {
 	return NodeKindObject
 }
 
+func (e *Object) ExportedVariables() (variables []string) {
+	for _, field := range e.Fields {
+		if export, ok := field.Value.(FieldExportVariable); ok {
+			variables = append(variables, export.ExportedVariables()...)
+		}
+	}
+	return
+}
+
 type EmptyObject struct{}
 
 func (_ *EmptyObject) NodeKind() NodeKind {
@@ -1712,8 +1719,8 @@ type FieldExport struct {
 	AsBoolean bool
 }
 
-type NodeExport interface {
-	FieldExport() *FieldExport
+type FieldExportVariable interface {
+	ExportedVariables() []string
 }
 
 type String struct {
@@ -1728,8 +1735,11 @@ func (_ *String) NodeKind() NodeKind {
 	return NodeKindString
 }
 
-func (s *String) FieldExport() *FieldExport {
-	return s.Export
+func (e *String) ExportedVariables() (variables []string) {
+	if e.Export != nil {
+		variables = append(variables, e.Export.Path[0])
+	}
+	return
 }
 
 type Boolean struct {
@@ -1742,8 +1752,11 @@ func (_ *Boolean) NodeKind() NodeKind {
 	return NodeKindBoolean
 }
 
-func (b *Boolean) FieldExport() *FieldExport {
-	return b.Export
+func (e *Boolean) ExportedVariables() (variables []string) {
+	if e.Export != nil {
+		variables = append(variables, e.Export.Path[0])
+	}
+	return
 }
 
 type Float struct {
@@ -1756,8 +1769,11 @@ func (_ *Float) NodeKind() NodeKind {
 	return NodeKindFloat
 }
 
-func (f *Float) FieldExport() *FieldExport {
-	return f.Export
+func (e *Float) ExportedVariables() (variables []string) {
+	if e.Export != nil {
+		variables = append(variables, e.Export.Path[0])
+	}
+	return
 }
 
 type Integer struct {
@@ -1770,8 +1786,11 @@ func (_ *Integer) NodeKind() NodeKind {
 	return NodeKindInteger
 }
 
-func (i *Integer) FieldExport() *FieldExport {
-	return i.Export
+func (e *Integer) ExportedVariables() (variables []string) {
+	if e.Export != nil {
+		variables = append(variables, e.Export.Path[0])
+	}
+	return
 }
 
 type Array struct {
@@ -1792,11 +1811,11 @@ func (_ *Array) NodeKind() NodeKind {
 	return NodeKindArray
 }
 
-func (a *Array) FieldExport() *FieldExport {
-	if itemExport, ok := a.Item.(NodeExport); ok {
-		return itemExport.FieldExport()
+func (e *Array) ExportedVariables() (variables []string) {
+	if itemExport, ok := e.Item.(FieldExportVariable); ok {
+		variables = append(variables, itemExport.ExportedVariables()...)
 	}
-	return nil
+	return
 }
 
 type GraphQLSubscription struct {
