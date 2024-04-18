@@ -1258,14 +1258,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
-	skipFieldFuncs := make(map[int]func(*Context) bool)
-	skipBufferIds, skipFieldIndexes := make(map[int]bool), make(map[int]bool)
-	addSkipDataFunc := func(index int) {
-		skipFieldIndexes[index] = true
-		if field := object.Fields[index]; field.HasBuffer {
-			skipBufferIds[field.BufferID] = true
-		}
-	}
+	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
+	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
 	var exportedVariables []string
 	for i := range object.Fields {
 		field := object.Fields[i]
@@ -1277,11 +1271,17 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			continue
 		}
 		if exportRequired {
-			skipFieldFuncs[i] = func(_ctx *Context) bool { return r.resolveSkipField(_ctx, field) }
+			delaySkipFieldFuncs[i] = func(_ctx *Context) bool { return r.resolveSkipField(_ctx, field) }
+			if field.HasBuffer {
+				delayBufferFuncs[field.BufferID] = nil
+			}
 			continue
 		}
 		if r.resolveSkipField(ctx, field) {
-			addSkipDataFunc(i)
+			skipFields[i] = true
+			if field.HasBuffer {
+				skipBuffers[field.BufferID] = true
+			}
 		}
 	}
 
@@ -1289,7 +1289,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	if object.Fetch != nil {
 		set = r.getResultSet()
 		defer r.freeResultSet(set)
-		set.buffersSkips = skipBufferIds
+		set.skipBuffers = skipBuffers
+		set.delayBufferFuncs = delayBufferFuncs
 		err = r.resolveFetch(ctx, object.Fetch, data, set)
 		if err != nil {
 			return
@@ -1309,13 +1310,19 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	first := true
 	skipCount := 0
 	for i := range object.Fields {
-		if _, ok := skipFieldIndexes[i]; ok {
+		if _, ok := skipFields[i]; ok {
 			skipCount++
 			continue
 		}
-		if skipFunc, ok := skipFieldFuncs[i]; ok && skipFunc(ctx) {
+		if skipFunc, ok := delaySkipFieldFuncs[i]; ok && skipFunc(ctx) {
 			skipCount++
 			continue
+		}
+		if delayFunc, ok := delayBufferFuncs[i]; ok && delayFunc != nil {
+			if err = delayFunc(ctx); err != nil {
+				return
+			}
+			r.MergeBufPairErrors(set.buffers[object.Fields[i].BufferID], objectBuf)
 		}
 
 		var fieldData []byte
@@ -1444,26 +1451,40 @@ func (r *Resolver) resolveFetch(ctx *Context, fetch Fetch, data []byte, set *res
 		return nil
 	}
 
-	var skipFetch bool
 	switch f := fetch.(type) {
 	case *SingleFetch:
-		preparedInput := r.getBufPair()
-		defer r.freeBufPair(preparedInput)
-		skipFetch, err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data)
-		if err != nil || skipFetch {
-			return err
+		fetchFunc, skip := r.buildSingleFetchFunc(f, data, set)
+		if skip {
+			return
 		}
-		err = r.resolveSingleFetch(ctx, f, preparedInput.Data, set.buffers[f.BufferId])
+		err = fetchFunc(ctx)
 	case *BatchFetch:
-		preparedInput := r.getBufPair()
-		defer r.freeBufPair(preparedInput)
-		skipFetch, err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data)
-		if err != nil || skipFetch {
-			return err
+		fetchFunc, skip := r.buildSingleFetchFunc(f.Fetch, data, set)
+		if skip {
+			return
 		}
-		err = r.resolveBatchFetch(ctx, f, preparedInput.Data, set.buffers[f.Fetch.BufferId])
+		err = fetchFunc(ctx)
 	case *ParallelFetch:
 		err = r.resolveParallelFetch(ctx, f, data, set)
+	}
+	return
+}
+
+func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch, data []byte, set *resultSet) (fetchFunc func(ctx *Context) error, skip bool) {
+	if _, skip = set.skipBuffers[fetch.BufferId]; skip {
+		return
+	}
+
+	fetchFunc = func(ctx *Context) error {
+		preparedInput := r.getBufPair()
+		defer r.freeBufPair(preparedInput)
+		if err := r.prepareSingleFetch(ctx, fetch, data, set, preparedInput.Data); err != nil {
+			return err
+		}
+		return r.resolveSingleFetch(ctx, fetch, preparedInput.Data, set.buffers[fetch.BufferId])
+	}
+	if _, skip = set.delayBufferFuncs[fetch.BufferId]; skip {
+		set.delayBufferFuncs[fetch.BufferId] = fetchFunc
 	}
 	return
 }
@@ -1480,18 +1501,17 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	var disallowParallelFetch bool
 	for i := range fetch.Fetches {
 		wg.Add(1)
-		var skipFetch bool
 		switch f := fetch.Fetches[i].(type) {
 		case *SingleFetch:
-			preparedInput := r.getBufPair()
-			*preparedInputs = append(*preparedInputs, preparedInput)
-			skipFetch, err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data)
-			if err != nil {
-				return err
-			}
-			if skipFetch {
+			if _, skip := r.buildSingleFetchFunc(f, data, set); skip {
 				wg.Done()
 				continue
+			}
+
+			preparedInput := r.getBufPair()
+			*preparedInputs = append(*preparedInputs, preparedInput)
+			if err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data); err != nil {
+				return err
 			}
 
 			buf := set.buffers[f.BufferId]
@@ -1500,15 +1520,15 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 			}
 			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
-			preparedInput := r.getBufPair()
-			*preparedInputs = append(*preparedInputs, preparedInput)
-			skipFetch, err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data)
-			if err != nil {
-				return err
-			}
-			if skipFetch {
+			if _, skip := r.buildSingleFetchFunc(f.Fetch, data, set); skip {
 				wg.Done()
 				continue
+			}
+
+			preparedInput := r.getBufPair()
+			*preparedInputs = append(*preparedInputs, preparedInput)
+			if err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data); err != nil {
+				return err
 			}
 
 			buf := set.buffers[f.Fetch.BufferId]
@@ -1540,10 +1560,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	return
 }
 
-func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (skip bool, err error) {
-	if _, skip = set.buffersSkips[fetch.BufferId]; skip {
-		return
-	}
+func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (err error) {
 	err = fetch.InputTemplate.Render(ctx, data, preparedInput)
 	buf := r.getBufPair()
 	set.buffers[fetch.BufferId] = buf
@@ -1659,8 +1676,9 @@ func (_ *Null) NodeKind() NodeKind {
 }
 
 type resultSet struct {
-	buffers      map[int]*BufPair
-	buffersSkips map[int]bool
+	buffers          map[int]*BufPair
+	skipBuffers      map[int]bool
+	delayBufferFuncs map[int]func(*Context) error
 }
 
 type SingleFetch struct {
