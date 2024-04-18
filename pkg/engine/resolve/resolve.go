@@ -1261,7 +1261,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
 	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
 	var exportedVariables []string
-	for i, field := range object.Fields {
+	for i := range object.Fields {
+		field := object.Fields[i]
 		if export, ok := field.Value.(FieldExportVariable); ok {
 			exportedVariables = append(exportedVariables, export.ExportedVariables()...)
 		}
