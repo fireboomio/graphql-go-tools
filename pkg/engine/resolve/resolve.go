@@ -1261,8 +1261,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
 	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
 	var exportedVariables []string
-	for i := range object.Fields {
-		field := object.Fields[i]
+	for i, field := range object.Fields {
 		if export, ok := field.Value.(FieldExportVariable); ok {
 			exportedVariables = append(exportedVariables, export.ExportedVariables()...)
 		}
@@ -1309,7 +1308,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	typeNameSkip := false
 	first := true
 	skipCount := 0
-	for i := range object.Fields {
+	for i, field := range object.Fields {
 		if _, ok := skipFields[i]; ok {
 			skipCount++
 			continue
@@ -1318,28 +1317,28 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			skipCount++
 			continue
 		}
-		if delayFunc, ok := delayBufferFuncs[i]; ok && delayFunc != nil {
-			if err = delayFunc(ctx); err != nil {
-				return
-			}
-			r.MergeBufPairErrors(set.buffers[object.Fields[i].BufferID], objectBuf)
-		}
 
 		var fieldData []byte
-		if set != nil && object.Fields[i].HasBuffer {
-			buffer, ok := set.buffers[object.Fields[i].BufferID]
+		if set != nil && field.HasBuffer {
+			if delayFunc, ok := delayBufferFuncs[field.BufferID]; ok && delayFunc != nil {
+				if err = delayFunc(ctx); err != nil {
+					return
+				}
+				r.MergeBufPairErrors(set.buffers[field.BufferID], objectBuf)
+			}
+			buffer, ok := set.buffers[field.BufferID]
 			if ok {
 				fieldData = buffer.Data.Bytes()
 				ctx.resetResponsePathElements()
-				ctx.lastFetchID = object.Fields[i].BufferID
+				ctx.lastFetchID = field.BufferID
 			}
 		} else {
 			fieldData = data
 		}
 
-		if object.Fields[i].OnTypeName != nil {
+		if field.OnTypeName != nil {
 			typeName, _, _, _ := jsonparser.Get(fieldData, "__typename")
-			if !bytes.Equal(typeName, object.Fields[i].OnTypeName) {
+			if !bytes.Equal(typeName, field.OnTypeName) {
 				typeNameSkip = true
 				// Restore the response elements that may have been reset above.
 				ctx.responseElements = responseElements
@@ -1355,12 +1354,12 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			objectBuf.Data.WriteBytes(comma)
 		}
 		objectBuf.Data.WriteBytes(quote)
-		objectBuf.Data.WriteBytes(object.Fields[i].Name)
+		objectBuf.Data.WriteBytes(field.Name)
 		objectBuf.Data.WriteBytes(quote)
 		objectBuf.Data.WriteBytes(colon)
-		ctx.addPathElement(object.Fields[i].Name)
-		ctx.setPosition(object.Fields[i].Position)
-		err = r.resolveNode(ctx, object.Fields[i].Value, fieldData, fieldBuf)
+		ctx.addPathElement(field.Name)
+		ctx.setPosition(field.Position)
+		err = r.resolveNode(ctx, field.Value, fieldData, fieldBuf)
 		ctx.removeLastPathElement()
 		ctx.responseElements = responseElements
 		ctx.lastFetchID = lastFetchID
@@ -1380,7 +1379,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				}
 
 				// if fied is of object type than we should not add resolve error here
-				if _, ok := object.Fields[i].Value.(*Object); !ok {
+				if _, ok := field.Value.(*Object); !ok {
 					r.addResolveError(ctx, objectBuf)
 				}
 			}
