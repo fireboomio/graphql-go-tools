@@ -1453,13 +1453,13 @@ func (r *Resolver) resolveFetch(ctx *Context, fetch Fetch, data []byte, set *res
 
 	switch f := fetch.(type) {
 	case *SingleFetch:
-		fetchFunc, skip := r.buildSingleFetchFunc(f, data, set)
+		fetchFunc, skip := r.buildResolveFetchFunc(f, data, set, r.buildSingleFetchFunc(f))
 		if skip {
 			return
 		}
 		err = fetchFunc(ctx)
 	case *BatchFetch:
-		fetchFunc, skip := r.buildSingleFetchFunc(f.Fetch, data, set)
+		fetchFunc, skip := r.buildResolveFetchFunc(f.Fetch, data, set, r.buildBatchFetchFunc(f))
 		if skip {
 			return
 		}
@@ -1470,7 +1470,8 @@ func (r *Resolver) resolveFetch(ctx *Context, fetch Fetch, data []byte, set *res
 	return
 }
 
-func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch, data []byte, set *resultSet) (fetchFunc func(ctx *Context) error, skip bool) {
+func (r *Resolver) buildResolveFetchFunc(fetch *SingleFetch, data []byte, set *resultSet,
+	resolveFetch func(*Context, *fastbuffer.FastBuffer, *BufPair) error) (fetchFunc func(ctx *Context) error, skip bool) {
 	if _, skip = set.skipBuffers[fetch.BufferId]; skip {
 		return
 	}
@@ -1481,12 +1482,24 @@ func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch, data []byte, set *re
 		if err := r.prepareSingleFetch(ctx, fetch, data, set, preparedInput.Data); err != nil {
 			return err
 		}
-		return r.resolveSingleFetch(ctx, fetch, preparedInput.Data, set.buffers[fetch.BufferId])
+		return resolveFetch(ctx, preparedInput.Data, set.buffers[fetch.BufferId])
 	}
 	if _, skip = set.delayBufferFuncs[fetch.BufferId]; skip {
 		set.delayBufferFuncs[fetch.BufferId] = fetchFunc
 	}
 	return
+}
+
+func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch) func(*Context, *fastbuffer.FastBuffer, *BufPair) error {
+	return func(ctx *Context, buffer *fastbuffer.FastBuffer, pair *BufPair) error {
+		return r.resolveSingleFetch(ctx, fetch, buffer, pair)
+	}
+}
+
+func (r *Resolver) buildBatchFetchFunc(fetch *BatchFetch) func(*Context, *fastbuffer.FastBuffer, *BufPair) error {
+	return func(ctx *Context, buffer *fastbuffer.FastBuffer, pair *BufPair) error {
+		return r.resolveBatchFetch(ctx, fetch, buffer, pair)
+	}
 }
 
 func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data []byte, set *resultSet) (err error) {
@@ -1503,7 +1516,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 		wg.Add(1)
 		switch f := fetch.Fetches[i].(type) {
 		case *SingleFetch:
-			if _, skip := r.buildSingleFetchFunc(f, data, set); skip {
+			if _, skip := r.buildResolveFetchFunc(f, data, set, r.buildSingleFetchFunc(f)); skip {
 				wg.Done()
 				continue
 			}
@@ -1520,7 +1533,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 			}
 			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
-			if _, skip := r.buildSingleFetchFunc(f.Fetch, data, set); skip {
+			if _, skip := r.buildResolveFetchFunc(f.Fetch, data, set, r.buildBatchFetchFunc(f)); skip {
 				wg.Done()
 				continue
 			}
