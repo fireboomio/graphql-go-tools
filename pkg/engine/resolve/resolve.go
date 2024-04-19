@@ -1233,6 +1233,39 @@ func (r *Resolver) resolveSkipFieldExportRequired(ctx *Context, exportedVariable
 	return
 }
 
+func (r *Resolver) resolveSkipNoBufferFieldPaths(ctx *Context, field *Field, exportedVariables []string, parent ...string) (skipPaths [][]string) {
+	if field.HasBuffer {
+		return
+	}
+
+	var fieldPath []string
+	if parentLength := len(parent); parentLength > 0 {
+		fieldPath = make([]string, parentLength+1)
+		copy(fieldPath, parent)
+		fieldPath[parentLength] = string(field.Name)
+		exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, field.SkipDirective, SkipDirective(field.IncludeDirective))
+		if exportRequired {
+			return
+		}
+		if skipDefined && r.resolveSkipField(ctx, field) {
+			skipPaths = append(skipPaths, fieldPath)
+			return
+		}
+	} else {
+		fieldPath = []string{string(field.Name)}
+	}
+
+	objectValue, ok := field.Value.(*Object)
+	if !ok {
+		return
+	}
+
+	for _, item := range objectValue.Fields {
+		skipPaths = append(skipPaths, r.resolveSkipNoBufferFieldPaths(ctx, item, exportedVariables, fieldPath...)...)
+	}
+	return
+}
+
 func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, objectBuf *BufPair) (err error) {
 	if len(object.Path) != 0 {
 		data, _, _, _ = jsonparser.Get(data, object.Path...)
@@ -1258,9 +1291,17 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
+	var (
+		exportedVariables   []string
+		skipFetchFieldPaths [][]string
+	)
+	addSkipFetchFieldPathsFunc := func(field *Field) {
+		if object.Fetch != nil {
+			skipFetchFieldPaths = append(skipFetchFieldPaths, r.resolveSkipNoBufferFieldPaths(ctx, field, exportedVariables)...)
+		}
+	}
 	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
 	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
-	var exportedVariables []string
 	for i := range object.Fields {
 		field := object.Fields[i]
 		if export, ok := field.Value.(FieldExportVariable); ok {
@@ -1268,6 +1309,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		}
 		exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, field.SkipDirective, SkipDirective(field.IncludeDirective))
 		if !skipDefined {
+			addSkipFetchFieldPathsFunc(field)
 			continue
 		}
 		if exportRequired {
@@ -1281,8 +1323,12 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			skipFields[i] = true
 			if field.HasBuffer {
 				skipBuffers[field.BufferID] = true
+			} else if object.Fetch != nil {
+				skipFetchFieldPaths = append(skipFetchFieldPaths, []string{string(field.Name)})
 			}
+			continue
 		}
+		addSkipFetchFieldPathsFunc(field)
 	}
 
 	var set *resultSet
@@ -1291,8 +1337,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		defer r.freeResultSet(set)
 		set.skipBuffers = skipBuffers
 		set.delayBufferFuncs = delayBufferFuncs
-		err = r.resolveFetch(ctx, object.Fetch, data, set)
-		if err != nil {
+		set.skipFieldPaths = skipFetchFieldPaths
+		if err = r.resolveFetch(ctx, object.Fetch, data, set); err != nil {
 			return
 		}
 		for i := range set.buffers {
@@ -1442,6 +1488,13 @@ func (r *Resolver) freeResultSet(set *resultSet) {
 		r.bufPairPool.Put(set.buffers[i])
 		delete(set.buffers, i)
 	}
+	for i := range set.skipBuffers {
+		delete(set.skipBuffers, i)
+	}
+	for i := range set.delayBufferFuncs {
+		delete(set.delayBufferFuncs, i)
+	}
+	set.skipFieldPaths = set.skipFieldPaths[:0]
 	r.resultSetPool.Put(set)
 }
 
@@ -1574,9 +1627,14 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 }
 
 func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (err error) {
-	err = fetch.InputTemplate.Render(ctx, data, preparedInput)
 	buf := r.getBufPair()
 	set.buffers[fetch.BufferId] = buf
+	if err = fetch.InputTemplate.Render(ctx, data, preparedInput); err != nil {
+		return
+	}
+	if len(set.skipFieldPaths) > 0 {
+		ctx.Context = context.WithValue(ctx.Context, fmt.Sprintf(skipFetchFieldPathsFormat, string(preparedInput.Bytes())), set.skipFieldPaths)
+	}
 	return
 }
 
@@ -1692,6 +1750,7 @@ type resultSet struct {
 	buffers          map[int]*BufPair
 	skipBuffers      map[int]bool
 	delayBufferFuncs map[int]func(*Context) error
+	skipFieldPaths   [][]string
 }
 
 type SingleFetch struct {

@@ -37,7 +37,10 @@ type InputTemplate struct {
 	SetTemplateOutputToNullOnVariableNull bool
 }
 
-const unrenderVariableKeyFormat = "unrender_variables(%s)"
+const (
+	unrenderVariableKeyFormat = "unrender_variables(%s)"
+	skipFetchFieldPathsFormat = "skip_fetch_field_paths(%s)"
+)
 
 type UnrenderVariable struct {
 	Name       string
@@ -51,6 +54,11 @@ type UnrenderVariable struct {
 func GetUnrenderVariables(ctx context.Context, preparedInputBytes []byte) ([]UnrenderVariable, bool) {
 	unrenderVariables, ok := ctx.Value(fmt.Sprintf(unrenderVariableKeyFormat, string(preparedInputBytes))).([]UnrenderVariable)
 	return unrenderVariables, ok
+}
+
+func GetSkipFetchFieldPaths(ctx context.Context, preparedInputBytes []byte) ([][]string, bool) {
+	skipFieldPaths, ok := ctx.Value(fmt.Sprintf(skipFetchFieldPathsFormat, string(preparedInputBytes))).([][]string)
+	return skipFieldPaths, ok
 }
 
 var setTemplateOutputNull = errors.New("set to null")
