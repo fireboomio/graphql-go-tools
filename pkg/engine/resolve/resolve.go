@@ -1250,7 +1250,7 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, exportedVariables []
 		}
 		itemPath := make([]string, pathLength+1)
 		copy(itemPath, path)
-		itemPath[pathLength] = string(item.Name)
+		itemPath[pathLength] = string(item.OriginName)
 		if skipDefined && r.resolveSkipField(ctx, item) {
 			skipPaths = append(skipPaths, itemPath)
 			continue
@@ -1294,7 +1294,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		if !field.HasBuffer {
 			return
 		}
-		skipFieldPaths := r.searchSkipBufferFieldPaths(ctx, exportedVariables, field.Value, string(field.Name))
+		skipFieldPaths := r.searchSkipBufferFieldPaths(ctx, exportedVariables, field.Value, string(field.OriginName))
 		if len(skipFieldPaths) > 0 {
 			skipBuffersFieldPaths[field.BufferID] = skipFieldPaths
 		}
@@ -1689,6 +1689,7 @@ func (_ *EmptyArray) NodeKind() NodeKind {
 
 type Field struct {
 	Name             []byte
+	OriginName       []byte
 	Value            Node
 	Position         Position
 	Defer            *DeferField

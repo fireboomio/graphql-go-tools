@@ -515,7 +515,8 @@ func (v *Visitor) EnterField(ref int) {
 	fieldAliasOrName := v.Operation.FieldAliasOrNameBytes(ref)
 	if bytes.Equal(fieldName, literal.TYPENAME) {
 		v.currentField = &resolve.Field{
-			Name: fieldAliasOrName,
+			Name:       fieldAliasOrName,
+			OriginName: fieldName,
 			Value: &resolve.String{
 				Nullable:   false,
 				Path:       []string{"__typename"},
@@ -562,6 +563,7 @@ func (v *Visitor) EnterField(ref int) {
 
 	v.currentField = &resolve.Field{
 		Name:             fieldAliasOrName,
+		OriginName:       fieldName,
 		Value:            v.resolveFieldValue(ref, fieldDefinitionType, true, path),
 		HasBuffer:        hasBuffer,
 		BufferID:         bufferID,
