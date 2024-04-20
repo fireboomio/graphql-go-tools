@@ -85,6 +85,10 @@ type Node interface {
 	NodeKind() NodeKind
 }
 
+type NodePath interface {
+	NodePath() []string
+}
+
 type NodeKind int
 type FetchKind int
 
@@ -1233,13 +1237,13 @@ func (r *Resolver) resolveSkipFieldExportRequired(ctx *Context, exportedVariable
 	return
 }
 
-func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, exportedVariables []string, node Node, path ...string) (skipPaths [][]string) {
+func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, exportedVariables []string, node Node, parent ...string) (skipPaths [][]string) {
 	objectNode, ok := node.(*Object)
 	if !ok {
 		return
 	}
 
-	pathLength := len(path)
+	objectPath := append(parent, objectNode.NodePath()...)
 	for _, item := range objectNode.Fields {
 		if item.HasBuffer {
 			continue
@@ -1248,15 +1252,21 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, exportedVariables []
 		if exportRequired {
 			continue
 		}
-		itemPath := make([]string, pathLength+1)
-		copy(itemPath, path)
-		itemPath[pathLength] = string(item.OriginName)
+		nodePath, isNodePath := item.Value.(NodePath)
+		if !isNodePath {
+			continue
+		}
+
 		if skipDefined && r.resolveSkipField(ctx, item) {
+			objectPathLength := len(objectPath)
+			itemPath := make([]string, objectPathLength+len(nodePath.NodePath()))
+			copy(itemPath, objectPath)
+			copy(itemPath[objectPathLength:], nodePath.NodePath())
 			skipPaths = append(skipPaths, itemPath)
 			continue
 		}
 
-		skipPaths = append(skipPaths, r.searchSkipBufferFieldPaths(ctx, exportedVariables, item.Value, itemPath...)...)
+		skipPaths = append(skipPaths, r.searchSkipBufferFieldPaths(ctx, exportedVariables, item.Value, objectPath...)...)
 	}
 	return
 }
@@ -1294,7 +1304,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		if !field.HasBuffer {
 			return
 		}
-		skipFieldPaths := r.searchSkipBufferFieldPaths(ctx, exportedVariables, field.Value, string(field.OriginName))
+		skipFieldPaths := r.searchSkipBufferFieldPaths(ctx, exportedVariables, field.Value)
 		if len(skipFieldPaths) > 0 {
 			skipBuffersFieldPaths[field.BufferID] = skipFieldPaths
 		}
@@ -1666,6 +1676,10 @@ func (_ *Object) NodeKind() NodeKind {
 	return NodeKindObject
 }
 
+func (e *Object) NodePath() []string {
+	return e.Path
+}
+
 func (e *Object) ExportedVariables() (variables []string) {
 	for _, field := range e.Fields {
 		if export, ok := field.Value.(FieldExportVariable); ok {
@@ -1689,7 +1703,6 @@ func (_ *EmptyArray) NodeKind() NodeKind {
 
 type Field struct {
 	Name             []byte
-	OriginName       []byte
 	Value            Node
 	Position         Position
 	Defer            *DeferField
@@ -1823,6 +1836,10 @@ func (_ *String) NodeKind() NodeKind {
 	return NodeKindString
 }
 
+func (e *String) NodePath() []string {
+	return e.Path
+}
+
 func (e *String) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1838,6 +1855,10 @@ type Boolean struct {
 
 func (_ *Boolean) NodeKind() NodeKind {
 	return NodeKindBoolean
+}
+
+func (e *Boolean) NodePath() []string {
+	return e.Path
 }
 
 func (e *Boolean) ExportedVariables() (variables []string) {
@@ -1857,6 +1878,10 @@ func (_ *Float) NodeKind() NodeKind {
 	return NodeKindFloat
 }
 
+func (e *Float) NodePath() []string {
+	return e.Path
+}
+
 func (e *Float) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1872,6 +1897,10 @@ type Integer struct {
 
 func (_ *Integer) NodeKind() NodeKind {
 	return NodeKindInteger
+}
+
+func (e *Integer) NodePath() []string {
+	return e.Path
 }
 
 func (e *Integer) ExportedVariables() (variables []string) {
@@ -1897,6 +1926,10 @@ type Stream struct {
 
 func (_ *Array) NodeKind() NodeKind {
 	return NodeKindArray
+}
+
+func (e *Array) NodePath() []string {
+	return e.Path
 }
 
 func (e *Array) ExportedVariables() (variables []string) {
