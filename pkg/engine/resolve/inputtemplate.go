@@ -39,7 +39,7 @@ type InputTemplate struct {
 
 const (
 	unrenderVariableKeyFormat = "unrender_variables(%s)"
-	skipFetchFieldPathsFormat = "skip_fetch_field_paths(%s)"
+	skipFieldJsonPathsFormat  = "skip_field_json_paths(%s)"
 )
 
 type UnrenderVariable struct {
@@ -56,8 +56,8 @@ func GetUnrenderVariables(ctx context.Context, preparedInputBytes []byte) ([]Unr
 	return unrenderVariables, ok
 }
 
-func GetSkipFetchFieldPaths(ctx context.Context, preparedInputBytes []byte) ([][]string, bool) {
-	skipFieldPaths, ok := ctx.Value(fmt.Sprintf(skipFetchFieldPathsFormat, string(preparedInputBytes))).([][]string)
+func GetSkipFieldJsonPaths(ctx context.Context, preparedInputBytes []byte) (map[string]bool, bool) {
+	skipFieldPaths, ok := ctx.Value(fmt.Sprintf(skipFieldJsonPathsFormat, string(preparedInputBytes))).(map[string]bool)
 	return skipFieldPaths, ok
 }
 

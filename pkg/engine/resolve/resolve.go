@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"golang.org/x/exp/maps"
 	"io"
 	"net/http"
 	"strconv"
@@ -85,8 +86,8 @@ type Node interface {
 	NodeKind() NodeKind
 }
 
-type NodePath interface {
-	NodePath() []string
+type NodeSkip interface {
+	NodeSkipPath() []string
 }
 
 type NodeKind int
@@ -123,22 +124,23 @@ type AfterFetchHook interface {
 
 type Context struct {
 	context.Context
-	RuleEvaluate     func([]byte, string) bool
-	Variables        []byte
-	Request          Request
-	pathElements     [][]byte
-	responseElements []string
-	lastFetchID      int
-	patches          []patch
-	usedBuffers      []*bytes.Buffer
-	currentPatch     int
-	maxPatch         int
-	pathPrefix       []byte
-	dataLoader       *dataLoader
-	beforeFetchHook  BeforeFetchHook
-	afterFetchHook   AfterFetchHook
-	position         Position
-	RenameTypeNames  []RenameTypeName
+	RuleEvaluate      func([]byte, string) bool
+	Variables         []byte
+	Request           Request
+	pathElements      [][]byte
+	responseElements  []string
+	lastFetchID       int
+	patches           []patch
+	usedBuffers       []*bytes.Buffer
+	currentPatch      int
+	maxPatch          int
+	pathPrefix        []byte
+	dataLoader        *dataLoader
+	beforeFetchHook   BeforeFetchHook
+	afterFetchHook    AfterFetchHook
+	position          Position
+	RenameTypeNames   []RenameTypeName
+	skipFieldPointers map[*Field]bool
 }
 
 type Request struct {
@@ -220,6 +222,7 @@ func (c *Context) Free() {
 	c.position = Position{}
 	c.dataLoader = nil
 	c.RenameTypeNames = nil
+	maps.Clear(c.skipFieldPointers)
 }
 
 func (c *Context) SetBeforeFetchHook(hook BeforeFetchHook) {
@@ -1237,36 +1240,48 @@ func (r *Resolver) resolveSkipFieldExportRequired(ctx *Context, exportedVariable
 	return
 }
 
-func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, exportedVariables []string, node Node, parent ...string) (skipPaths [][]string) {
-	objectNode, ok := node.(*Object)
-	if !ok {
-		return
-	}
-
-	objectPath := append(parent, objectNode.NodePath()...)
-	for _, item := range objectNode.Fields {
-		if item.HasBuffer {
-			continue
-		}
-		exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, item.SkipDirective, SkipDirective(item.IncludeDirective))
-		if exportRequired {
-			continue
-		}
-		nodePath, isNodePath := item.Value.(NodePath)
-		if !isNodePath {
-			continue
-		}
-
-		if skipDefined && r.resolveSkipField(ctx, item) {
-			objectPathLength := len(objectPath)
-			itemPath := make([]string, objectPathLength+len(nodePath.NodePath()))
+func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldPointers map[*Field]bool, exportedVariables []string, node Node, parent ...string) (skipFieldJsonPaths map[string]bool, skipAll bool) {
+	switch ret := node.(type) {
+	case *Array:
+		skipFieldJsonPaths, skipAll = r.searchSkipBufferFieldPaths(ctx, skipFieldPointers, exportedVariables, ret.Item, parent...)
+	case *Object:
+		objectPath := append(parent, ret.NodeSkipPath()...)
+		objectSkipCount, objectPathLength := 0, len(objectPath)
+		skipFieldJsonPaths = make(map[string]bool)
+		addObjectSkipJsonPathFunc := func(itemField *Field) {
+			nodeSkip, ok := itemField.Value.(NodeSkip)
+			if !ok {
+				return
+			}
+			objectSkipCount++
+			itemPath := make([]string, objectPathLength+len(nodeSkip.NodeSkipPath()))
 			copy(itemPath, objectPath)
-			copy(itemPath[objectPathLength:], nodePath.NodePath())
-			skipPaths = append(skipPaths, itemPath)
-			continue
+			copy(itemPath[objectPathLength:], nodeSkip.NodeSkipPath())
+			skipFieldJsonPaths[strings.Join(itemPath, ".")] = true
+			skipFieldPointers[itemField] = true
 		}
+		for _, item := range ret.Fields {
+			if item.HasBuffer {
+				continue
+			}
+			exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, item.SkipDirective, SkipDirective(item.IncludeDirective))
+			if exportRequired {
+				continue
+			}
 
-		skipPaths = append(skipPaths, r.searchSkipBufferFieldPaths(ctx, exportedVariables, item.Value, objectPath...)...)
+			if skipDefined && r.resolveSkipField(ctx, item) {
+				addObjectSkipJsonPathFunc(item)
+				continue
+			}
+
+			itemSkipJsonPaths, itemSkipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldPointers, exportedVariables, item.Value, objectPath...)
+			if itemSkipAll {
+				addObjectSkipJsonPathFunc(item)
+			} else {
+				maps.Copy(skipFieldJsonPaths, itemSkipJsonPaths)
+			}
+		}
+		skipAll = objectSkipCount == len(ret.Fields)
 	}
 	return
 }
@@ -1299,14 +1314,27 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	var exportedVariables []string
 	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
 	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
-	skipBuffersFieldPaths := make(map[int][][]string)
+	skipBuffersFieldJsonPaths, skipBuffersFieldPointers := make(map[int]map[string]bool), make(map[int]map[*Field]bool)
+	defer func() {
+		maps.Clear(skipFields)
+		maps.Clear(delaySkipFieldFuncs)
+		maps.Clear(skipBuffersFieldPointers)
+	}()
 	addSkipBuffersFieldPathsFunc := func(field *Field) {
 		if !field.HasBuffer {
 			return
 		}
-		skipFieldPaths := r.searchSkipBufferFieldPaths(ctx, exportedVariables, field.Value)
-		if len(skipFieldPaths) > 0 {
-			skipBuffersFieldPaths[field.BufferID] = skipFieldPaths
+		skipFieldPointers := make(map[*Field]bool)
+		skipFieldJsonPaths, skipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldPointers, exportedVariables, field.Value)
+		if skipAll {
+			skipBuffers[field.BufferID] = true
+			return
+		}
+		if len(skipFieldJsonPaths) > 0 {
+			skipBuffersFieldJsonPaths[field.BufferID] = skipFieldJsonPaths
+		}
+		if len(skipFieldPointers) > 0 {
+			skipBuffersFieldPointers[field.BufferID] = skipFieldPointers
 		}
 	}
 	for i := range object.Fields {
@@ -1342,7 +1370,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		defer r.freeResultSet(set)
 		set.skipBuffers = skipBuffers
 		set.delayBufferFuncs = delayBufferFuncs
-		set.skipBuffersFieldPaths = skipBuffersFieldPaths
+		set.skipBuffersFieldJsonPaths = skipBuffersFieldJsonPaths
 		if err = r.resolveFetch(ctx, object.Fetch, data, set); err != nil {
 			return
 		}
@@ -1366,6 +1394,10 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			continue
 		}
 		if skipFunc, ok := delaySkipFieldFuncs[i]; ok && skipFunc(ctx) {
+			skipCount++
+			continue
+		}
+		if _, ok := ctx.skipFieldPointers[field]; ok {
 			skipCount++
 			continue
 		}
@@ -1411,7 +1443,13 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		objectBuf.Data.WriteBytes(colon)
 		ctx.addPathElement(field.Name)
 		ctx.setPosition(field.Position)
+		if field.HasBuffer {
+			ctx.skipFieldPointers = skipBuffersFieldPointers[field.BufferID]
+		}
 		err = r.resolveNode(ctx, field.Value, fieldData, fieldBuf)
+		if field.HasBuffer {
+			maps.Clear(ctx.skipFieldPointers)
+		}
 		ctx.removeLastPathElement()
 		ctx.responseElements = responseElements
 		ctx.lastFetchID = lastFetchID
@@ -1499,8 +1537,8 @@ func (r *Resolver) freeResultSet(set *resultSet) {
 	for i := range set.delayBufferFuncs {
 		delete(set.delayBufferFuncs, i)
 	}
-	for i := range set.skipBuffersFieldPaths {
-		delete(set.skipBuffersFieldPaths, i)
+	for i := range set.skipBuffersFieldJsonPaths {
+		delete(set.skipBuffersFieldJsonPaths, i)
 	}
 	r.resultSetPool.Put(set)
 }
@@ -1639,8 +1677,8 @@ func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []b
 	if err = fetch.InputTemplate.Render(ctx, data, preparedInput); err != nil {
 		return
 	}
-	if skipFieldPaths, ok := set.skipBuffersFieldPaths[fetch.BufferId]; ok {
-		ctx.Context = context.WithValue(ctx.Context, fmt.Sprintf(skipFetchFieldPathsFormat, string(preparedInput.Bytes())), skipFieldPaths)
+	if skipFieldPaths, ok := set.skipBuffersFieldJsonPaths[fetch.BufferId]; ok {
+		ctx.Context = context.WithValue(ctx.Context, fmt.Sprintf(skipFieldJsonPathsFormat, string(preparedInput.Bytes())), skipFieldPaths)
 	}
 	return
 }
@@ -1676,7 +1714,7 @@ func (_ *Object) NodeKind() NodeKind {
 	return NodeKindObject
 }
 
-func (e *Object) NodePath() []string {
+func (e *Object) NodeSkipPath() []string {
 	return e.Path
 }
 
@@ -1758,10 +1796,10 @@ func (_ *Null) NodeKind() NodeKind {
 }
 
 type resultSet struct {
-	buffers               map[int]*BufPair
-	skipBuffers           map[int]bool
-	skipBuffersFieldPaths map[int][][]string
-	delayBufferFuncs      map[int]func(*Context) error
+	buffers                   map[int]*BufPair
+	skipBuffers               map[int]bool
+	skipBuffersFieldJsonPaths map[int]map[string]bool
+	delayBufferFuncs          map[int]func(*Context) error
 }
 
 type SingleFetch struct {
@@ -1836,7 +1874,7 @@ func (_ *String) NodeKind() NodeKind {
 	return NodeKindString
 }
 
-func (e *String) NodePath() []string {
+func (e *String) NodeSkipPath() []string {
 	return e.Path
 }
 
@@ -1857,7 +1895,7 @@ func (_ *Boolean) NodeKind() NodeKind {
 	return NodeKindBoolean
 }
 
-func (e *Boolean) NodePath() []string {
+func (e *Boolean) NodeSkipPath() []string {
 	return e.Path
 }
 
@@ -1878,7 +1916,7 @@ func (_ *Float) NodeKind() NodeKind {
 	return NodeKindFloat
 }
 
-func (e *Float) NodePath() []string {
+func (e *Float) NodeSkipPath() []string {
 	return e.Path
 }
 
@@ -1899,7 +1937,7 @@ func (_ *Integer) NodeKind() NodeKind {
 	return NodeKindInteger
 }
 
-func (e *Integer) NodePath() []string {
+func (e *Integer) NodeSkipPath() []string {
 	return e.Path
 }
 
@@ -1928,7 +1966,7 @@ func (_ *Array) NodeKind() NodeKind {
 	return NodeKindArray
 }
 
-func (e *Array) NodePath() []string {
+func (e *Array) NodeSkipPath() []string {
 	return e.Path
 }
 
