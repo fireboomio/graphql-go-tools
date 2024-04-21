@@ -88,6 +88,7 @@ type Node interface {
 
 type NodeSkip interface {
 	NodeSkipPath() []string
+	NodeZeroValue() []byte
 }
 
 type NodeKind int
@@ -124,23 +125,23 @@ type AfterFetchHook interface {
 
 type Context struct {
 	context.Context
-	RuleEvaluate      func([]byte, string) bool
-	Variables         []byte
-	Request           Request
-	pathElements      [][]byte
-	responseElements  []string
-	lastFetchID       int
-	patches           []patch
-	usedBuffers       []*bytes.Buffer
-	currentPatch      int
-	maxPatch          int
-	pathPrefix        []byte
-	dataLoader        *dataLoader
-	beforeFetchHook   BeforeFetchHook
-	afterFetchHook    AfterFetchHook
-	position          Position
-	RenameTypeNames   []RenameTypeName
-	skipFieldPointers map[*Field]bool
+	RuleEvaluate        func([]byte, string) bool
+	Variables           []byte
+	Request             Request
+	pathElements        [][]byte
+	responseElements    []string
+	lastFetchID         int
+	patches             []patch
+	usedBuffers         []*bytes.Buffer
+	currentPatch        int
+	maxPatch            int
+	pathPrefix          []byte
+	dataLoader          *dataLoader
+	beforeFetchHook     BeforeFetchHook
+	afterFetchHook      AfterFetchHook
+	position            Position
+	RenameTypeNames     []RenameTypeName
+	skipFieldZeroValues map[*Field][]byte
 }
 
 type Request struct {
@@ -222,7 +223,7 @@ func (c *Context) Free() {
 	c.position = Position{}
 	c.dataLoader = nil
 	c.RenameTypeNames = nil
-	maps.Clear(c.skipFieldPointers)
+	maps.Clear(c.skipFieldZeroValues)
 }
 
 func (c *Context) SetBeforeFetchHook(hook BeforeFetchHook) {
@@ -1240,10 +1241,10 @@ func (r *Resolver) resolveSkipFieldExportRequired(ctx *Context, exportedVariable
 	return
 }
 
-func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldPointers map[*Field]bool, exportedVariables []string, node Node, parent ...string) (skipFieldJsonPaths map[string]bool, skipAll bool) {
+func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues map[*Field][]byte, exportedVariables []string, node Node, parent ...string) (skipFieldJsonPaths map[string]bool, skipAll bool) {
 	switch ret := node.(type) {
 	case *Array:
-		skipFieldJsonPaths, skipAll = r.searchSkipBufferFieldPaths(ctx, skipFieldPointers, exportedVariables, ret.Item, parent...)
+		skipFieldJsonPaths, skipAll = r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, ret.Item, parent...)
 	case *Object:
 		objectPath := append(parent, ret.NodeSkipPath()...)
 		objectSkipCount, objectPathLength := 0, len(objectPath)
@@ -1258,7 +1259,7 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldPointers ma
 			copy(itemPath, objectPath)
 			copy(itemPath[objectPathLength:], nodeSkip.NodeSkipPath())
 			skipFieldJsonPaths[strings.Join(itemPath, ".")] = true
-			skipFieldPointers[itemField] = true
+			skipFieldZeroValues[itemField] = nodeSkip.NodeZeroValue()
 		}
 		for _, item := range ret.Fields {
 			if item.HasBuffer {
@@ -1274,7 +1275,7 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldPointers ma
 				continue
 			}
 
-			itemSkipJsonPaths, itemSkipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldPointers, exportedVariables, item.Value, objectPath...)
+			itemSkipJsonPaths, itemSkipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, item.Value, objectPath...)
 			if itemSkipAll {
 				addObjectSkipJsonPathFunc(item)
 			} else {
@@ -1314,18 +1315,18 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	var exportedVariables []string
 	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
 	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
-	skipBuffersFieldJsonPaths, skipBuffersFieldPointers := make(map[int]map[string]bool), make(map[int]map[*Field]bool)
+	skipBuffersFieldJsonPaths, skipBuffersFieldZeroValues := make(map[int]map[string]bool), make(map[int]map[*Field][]byte)
 	defer func() {
 		maps.Clear(skipFields)
 		maps.Clear(delaySkipFieldFuncs)
-		maps.Clear(skipBuffersFieldPointers)
+		maps.Clear(skipBuffersFieldZeroValues)
 	}()
 	addSkipBuffersFieldPathsFunc := func(field *Field) {
 		if !field.HasBuffer {
 			return
 		}
-		skipFieldPointers := make(map[*Field]bool)
-		skipFieldJsonPaths, skipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldPointers, exportedVariables, field.Value)
+		skipFieldZeroValues := make(map[*Field][]byte)
+		skipFieldJsonPaths, skipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, field.Value)
 		if skipAll {
 			skipBuffers[field.BufferID] = true
 			return
@@ -1333,8 +1334,8 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		if len(skipFieldJsonPaths) > 0 {
 			skipBuffersFieldJsonPaths[field.BufferID] = skipFieldJsonPaths
 		}
-		if len(skipFieldPointers) > 0 {
-			skipBuffersFieldPointers[field.BufferID] = skipFieldPointers
+		if len(skipFieldZeroValues) > 0 {
+			skipBuffersFieldZeroValues[field.BufferID] = skipFieldZeroValues
 		}
 	}
 	for i := range object.Fields {
@@ -1397,10 +1398,6 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			skipCount++
 			continue
 		}
-		if _, ok := ctx.skipFieldPointers[field]; ok {
-			skipCount++
-			continue
-		}
 
 		var fieldData []byte
 		if set != nil && field.HasBuffer {
@@ -1415,6 +1412,11 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				fieldData = buffer.Data.Bytes()
 				ctx.resetResponsePathElements()
 				ctx.lastFetchID = field.BufferID
+			}
+		} else if zeroValue, ok := ctx.skipFieldZeroValues[field]; ok {
+			if fieldData = zeroValue; fieldData == nil {
+				skipCount++
+				continue
 			}
 		} else {
 			fieldData = data
@@ -1444,11 +1446,11 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		ctx.addPathElement(field.Name)
 		ctx.setPosition(field.Position)
 		if field.HasBuffer {
-			ctx.skipFieldPointers = skipBuffersFieldPointers[field.BufferID]
+			ctx.skipFieldZeroValues = skipBuffersFieldZeroValues[field.BufferID]
 		}
 		err = r.resolveNode(ctx, field.Value, fieldData, fieldBuf)
 		if field.HasBuffer {
-			maps.Clear(ctx.skipFieldPointers)
+			maps.Clear(ctx.skipFieldZeroValues)
 		}
 		ctx.removeLastPathElement()
 		ctx.responseElements = responseElements
@@ -1718,6 +1720,13 @@ func (e *Object) NodeSkipPath() []string {
 	return e.Path
 }
 
+func (e *Object) NodeZeroValue() []byte {
+	if e.Nullable {
+		return nil
+	}
+	return literal.ZeroObjectValue
+}
+
 func (e *Object) ExportedVariables() (variables []string) {
 	for _, field := range e.Fields {
 		if export, ok := field.Value.(FieldExportVariable); ok {
@@ -1878,6 +1887,13 @@ func (e *String) NodeSkipPath() []string {
 	return e.Path
 }
 
+func (e *String) NodeZeroValue() []byte {
+	if e.Nullable {
+		return nil
+	}
+	return literal.ZeroStringWithQuoteValue
+}
+
 func (e *String) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1897,6 +1913,13 @@ func (_ *Boolean) NodeKind() NodeKind {
 
 func (e *Boolean) NodeSkipPath() []string {
 	return e.Path
+}
+
+func (e *Boolean) NodeZeroValue() []byte {
+	if e.Nullable {
+		return nil
+	}
+	return literal.FALSE
 }
 
 func (e *Boolean) ExportedVariables() (variables []string) {
@@ -1920,6 +1943,13 @@ func (e *Float) NodeSkipPath() []string {
 	return e.Path
 }
 
+func (e *Float) NodeZeroValue() []byte {
+	if e.Nullable {
+		return nil
+	}
+	return literal.ZeroNumberValue
+}
+
 func (e *Float) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1939,6 +1969,13 @@ func (_ *Integer) NodeKind() NodeKind {
 
 func (e *Integer) NodeSkipPath() []string {
 	return e.Path
+}
+
+func (e *Integer) NodeZeroValue() []byte {
+	if e.Nullable {
+		return nil
+	}
+	return literal.ZeroNumberValue
 }
 
 func (e *Integer) ExportedVariables() (variables []string) {
@@ -1968,6 +2005,13 @@ func (_ *Array) NodeKind() NodeKind {
 
 func (e *Array) NodeSkipPath() []string {
 	return e.Path
+}
+
+func (e *Array) NodeZeroValue() []byte {
+	if e.Nullable {
+		return nil
+	}
+	return literal.ZeroArrayValue
 }
 
 func (e *Array) ExportedVariables() (variables []string) {
