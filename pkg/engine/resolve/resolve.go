@@ -88,7 +88,7 @@ type Node interface {
 
 type NodeSkip interface {
 	NodeSkipPath() []string
-	NodeZeroValue() []byte
+	NodeZeroValue(bool) []byte
 }
 
 type NodeKind int
@@ -1249,7 +1249,7 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues 
 		objectPath := append(parent, ret.NodeSkipPath()...)
 		objectSkipCount, objectPathLength := 0, len(objectPath)
 		skipFieldJsonPaths = make(map[string]bool)
-		addObjectSkipJsonPathFunc := func(itemField *Field) {
+		addObjectSkipJsonPathFunc := func(itemField *Field, itemSkipAll bool) {
 			nodeSkip, ok := itemField.Value.(NodeSkip)
 			if !ok {
 				return
@@ -1259,7 +1259,7 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues 
 			copy(itemPath, objectPath)
 			copy(itemPath[objectPathLength:], nodeSkip.NodeSkipPath())
 			skipFieldJsonPaths[strings.Join(itemPath, ".")] = true
-			skipFieldZeroValues[itemField] = nodeSkip.NodeZeroValue()
+			skipFieldZeroValues[itemField] = nodeSkip.NodeZeroValue(itemSkipAll)
 		}
 		for _, item := range ret.Fields {
 			if item.HasBuffer {
@@ -1271,13 +1271,13 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues 
 			}
 
 			if skipDefined && r.resolveSkipField(ctx, item) {
-				addObjectSkipJsonPathFunc(item)
+				addObjectSkipJsonPathFunc(item, false)
 				continue
 			}
 
 			itemSkipJsonPaths, itemSkipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, item.Value, objectPath...)
 			if itemSkipAll {
-				addObjectSkipJsonPathFunc(item)
+				addObjectSkipJsonPathFunc(item, true)
 			} else {
 				maps.Copy(skipFieldJsonPaths, itemSkipJsonPaths)
 			}
@@ -1720,8 +1720,8 @@ func (e *Object) NodeSkipPath() []string {
 	return e.Path
 }
 
-func (e *Object) NodeZeroValue() []byte {
-	if e.Nullable {
+func (e *Object) NodeZeroValue(skipAll bool) []byte {
+	if e.Nullable && !skipAll {
 		return nil
 	}
 	return literal.ZeroObjectValue
@@ -1887,7 +1887,7 @@ func (e *String) NodeSkipPath() []string {
 	return e.Path
 }
 
-func (e *String) NodeZeroValue() []byte {
+func (e *String) NodeZeroValue(bool) []byte {
 	if e.Nullable {
 		return nil
 	}
@@ -1915,7 +1915,7 @@ func (e *Boolean) NodeSkipPath() []string {
 	return e.Path
 }
 
-func (e *Boolean) NodeZeroValue() []byte {
+func (e *Boolean) NodeZeroValue(bool) []byte {
 	if e.Nullable {
 		return nil
 	}
@@ -1943,7 +1943,7 @@ func (e *Float) NodeSkipPath() []string {
 	return e.Path
 }
 
-func (e *Float) NodeZeroValue() []byte {
+func (e *Float) NodeZeroValue(bool) []byte {
 	if e.Nullable {
 		return nil
 	}
@@ -1971,7 +1971,7 @@ func (e *Integer) NodeSkipPath() []string {
 	return e.Path
 }
 
-func (e *Integer) NodeZeroValue() []byte {
+func (e *Integer) NodeZeroValue(bool) []byte {
 	if e.Nullable {
 		return nil
 	}
@@ -2007,8 +2007,8 @@ func (e *Array) NodeSkipPath() []string {
 	return e.Path
 }
 
-func (e *Array) NodeZeroValue() []byte {
-	if e.Nullable {
+func (e *Array) NodeZeroValue(skipAll bool) []byte {
+	if e.Nullable && !skipAll {
 		return nil
 	}
 	return literal.ZeroArrayValue
