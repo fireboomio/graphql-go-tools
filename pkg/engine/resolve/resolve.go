@@ -1335,13 +1335,14 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		maps.Clear(delaySkipFieldFuncs)
 		maps.Clear(skipBuffersFieldZeroValues)
 	}()
-	addSkipBuffersFieldPathsFunc := func(field *Field) {
+	addSkipBuffersFieldPathsFunc := func(index int, field *Field) {
 		if !field.HasBuffer {
 			return
 		}
 		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
 		skipFieldJsonPaths, skipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, field.Value)
 		if skipAll {
+			skipFields[index] = true
 			skipBuffers[field.BufferID] = true
 			return
 		}
@@ -1359,7 +1360,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		}
 		exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, field.SkipDirective, SkipDirective(field.IncludeDirective))
 		if !skipDefined {
-			addSkipBuffersFieldPathsFunc(field)
+			addSkipBuffersFieldPathsFunc(i, field)
 			continue
 		}
 		if exportRequired {
@@ -1376,7 +1377,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			}
 			continue
 		}
-		addSkipBuffersFieldPathsFunc(field)
+		addSkipBuffersFieldPathsFunc(i, field)
 	}
 
 	var set *resultSet
