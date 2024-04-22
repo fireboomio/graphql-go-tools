@@ -87,8 +87,13 @@ type Node interface {
 }
 
 type NodeSkip interface {
-	NodeSkipPath() []string
+	NodePath() []string
 	NodeZeroValue(bool) []byte
+}
+
+type NodeZeroValue struct {
+	Path      []string
+	ZeroValue []byte
 }
 
 type NodeKind int
@@ -141,7 +146,7 @@ type Context struct {
 	afterFetchHook      AfterFetchHook
 	position            Position
 	RenameTypeNames     []RenameTypeName
-	skipFieldZeroValues map[*Field][]byte
+	skipFieldZeroValues map[*Field]*NodeZeroValue
 }
 
 type Request struct {
@@ -1241,12 +1246,12 @@ func (r *Resolver) resolveSkipFieldExportRequired(ctx *Context, exportedVariable
 	return
 }
 
-func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues map[*Field][]byte, exportedVariables []string, node Node, parent ...string) (skipFieldJsonPaths map[string]bool, skipAll bool) {
+func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues map[*Field]*NodeZeroValue, exportedVariables []string, node Node, parent ...string) (skipFieldJsonPaths map[string]bool, skipAll bool) {
 	switch ret := node.(type) {
 	case *Array:
 		skipFieldJsonPaths, skipAll = r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, ret.Item, parent...)
 	case *Object:
-		objectPath := append(parent, ret.NodeSkipPath()...)
+		objectPath := append(parent, ret.NodePath()...)
 		objectSkipCount, objectPathLength := 0, len(objectPath)
 		skipFieldJsonPaths = make(map[string]bool)
 		addObjectSkipJsonPathFunc := func(itemField *Field, itemSkipAll bool) {
@@ -1254,12 +1259,21 @@ func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues 
 			if !ok {
 				return
 			}
+			var itemPath []string
+			zeroValue := &NodeZeroValue{
+				Path:      nodeSkip.NodePath(),
+				ZeroValue: nodeSkip.NodeZeroValue(itemSkipAll),
+			}
+			if nodeSkipPathLen := len(zeroValue.Path); nodeSkipPathLen > 0 {
+				itemPath = make([]string, objectPathLength+nodeSkipPathLen)
+				copy(itemPath, objectPath)
+				copy(itemPath[objectPathLength:], zeroValue.Path)
+			} else {
+				itemPath = objectPath
+			}
 			objectSkipCount++
-			itemPath := make([]string, objectPathLength+len(nodeSkip.NodeSkipPath()))
-			copy(itemPath, objectPath)
-			copy(itemPath[objectPathLength:], nodeSkip.NodeSkipPath())
+			skipFieldZeroValues[itemField] = zeroValue
 			skipFieldJsonPaths[strings.Join(itemPath, ".")] = true
-			skipFieldZeroValues[itemField] = nodeSkip.NodeZeroValue(itemSkipAll)
 		}
 		for _, item := range ret.Fields {
 			if item.HasBuffer {
@@ -1315,7 +1329,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	var exportedVariables []string
 	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
 	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
-	skipBuffersFieldJsonPaths, skipBuffersFieldZeroValues := make(map[int]map[string]bool), make(map[int]map[*Field][]byte)
+	skipBuffersFieldJsonPaths, skipBuffersFieldZeroValues := make(map[int]map[string]bool), make(map[int]map[*Field]*NodeZeroValue)
 	defer func() {
 		maps.Clear(skipFields)
 		maps.Clear(delaySkipFieldFuncs)
@@ -1325,7 +1339,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		if !field.HasBuffer {
 			return
 		}
-		skipFieldZeroValues := make(map[*Field][]byte)
+		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
 		skipFieldJsonPaths, skipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, field.Value)
 		if skipAll {
 			skipBuffers[field.BufferID] = true
@@ -1413,10 +1427,15 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				ctx.resetResponsePathElements()
 				ctx.lastFetchID = field.BufferID
 			}
-		} else if zeroValue, ok := ctx.skipFieldZeroValues[field]; ok {
-			if fieldData = zeroValue; fieldData == nil {
+		} else if nodeZero, ok := ctx.skipFieldZeroValues[field]; ok {
+			if nodeZero.ZeroValue == nil {
 				skipCount++
 				continue
+			}
+			if len(nodeZero.Path) > 0 {
+				fieldData, _ = jsonparser.Set(data, nodeZero.ZeroValue, nodeZero.Path...)
+			} else {
+				fieldData = nodeZero.ZeroValue
 			}
 		} else {
 			fieldData = data
@@ -1716,7 +1735,7 @@ func (_ *Object) NodeKind() NodeKind {
 	return NodeKindObject
 }
 
-func (e *Object) NodeSkipPath() []string {
+func (e *Object) NodePath() []string {
 	return e.Path
 }
 
@@ -1883,7 +1902,7 @@ func (_ *String) NodeKind() NodeKind {
 	return NodeKindString
 }
 
-func (e *String) NodeSkipPath() []string {
+func (e *String) NodePath() []string {
 	return e.Path
 }
 
@@ -1911,7 +1930,7 @@ func (_ *Boolean) NodeKind() NodeKind {
 	return NodeKindBoolean
 }
 
-func (e *Boolean) NodeSkipPath() []string {
+func (e *Boolean) NodePath() []string {
 	return e.Path
 }
 
@@ -1939,7 +1958,7 @@ func (_ *Float) NodeKind() NodeKind {
 	return NodeKindFloat
 }
 
-func (e *Float) NodeSkipPath() []string {
+func (e *Float) NodePath() []string {
 	return e.Path
 }
 
@@ -1967,7 +1986,7 @@ func (_ *Integer) NodeKind() NodeKind {
 	return NodeKindInteger
 }
 
-func (e *Integer) NodeSkipPath() []string {
+func (e *Integer) NodePath() []string {
 	return e.Path
 }
 
@@ -2003,7 +2022,7 @@ func (_ *Array) NodeKind() NodeKind {
 	return NodeKindArray
 }
 
-func (e *Array) NodeSkipPath() []string {
+func (e *Array) NodePath() []string {
 	return e.Path
 }
 
