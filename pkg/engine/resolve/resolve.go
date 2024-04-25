@@ -1466,23 +1466,15 @@ func (r *Resolver) skipOrSetDelayFunc(fetch *SingleFetch, set *resultSet, fetchF
 
 func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch, set *resultSet) func(*Context, []byte) error {
 	return func(ctx *Context, data []byte) error {
-		preparedInput := r.getBufPair()
-		defer r.freeBufPair(preparedInput)
-		if err := r.prepareSingleFetch(ctx, fetch, data, set, preparedInput.Data); err != nil {
-			return err
-		}
-		return r.resolveSingleFetch(ctx, fetch, preparedInput.Data, set)
+		set.buffers[fetch.BufferId] = r.getBufPair()
+		return r.resolveSingleFetch(ctx, fetch, data, set)
 	}
 }
 
 func (r *Resolver) buildBatchFetchFunc(fetch *BatchFetch, set *resultSet) func(*Context, []byte) error {
 	return func(ctx *Context, data []byte) error {
-		preparedInput := r.getBufPair()
-		defer r.freeBufPair(preparedInput)
-		if err := r.prepareSingleFetch(ctx, fetch.Fetch, data, set, preparedInput.Data); err != nil {
-			return err
-		}
-		return r.resolveBatchFetch(ctx, fetch, preparedInput.Data, set)
+		set.buffers[fetch.Fetch.BufferId] = r.getBufPair()
+		return r.resolveBatchFetch(ctx, fetch, data, set)
 	}
 }
 
@@ -1505,16 +1497,9 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 				continue
 			}
 
-			preparedInput := r.getBufPair()
-			*preparedInputs = append(*preparedInputs, preparedInput)
-			if err = r.prepareSingleFetch(ctx, f, data, set, preparedInput.Data); err != nil {
-				return err
-			}
-
-			buf := set.buffers[f.BufferId]
-			resolvers[buf] = func() error {
-				return r.resolveSingleFetch(ctx, f, preparedInput.Data, set)
-			}
+			buf := r.getBufPair()
+			set.buffers[f.BufferId] = buf
+			resolvers[buf] = func() error { return r.resolveSingleFetch(ctx, f, data, set) }
 			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
 			if skip := r.skipOrSetDelayFunc(f.Fetch, set, r.buildBatchFetchFunc(f, set)); skip {
@@ -1522,16 +1507,9 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 				continue
 			}
 
-			preparedInput := r.getBufPair()
-			*preparedInputs = append(*preparedInputs, preparedInput)
-			if err = r.prepareSingleFetch(ctx, f.Fetch, data, set, preparedInput.Data); err != nil {
-				return err
-			}
-
-			buf := set.buffers[f.Fetch.BufferId]
-			resolvers[buf] = func() error {
-				return r.resolveBatchFetch(ctx, f, preparedInput.Data, set)
-			}
+			buf := r.getBufPair()
+			set.buffers[f.Fetch.BufferId] = buf
+			resolvers[buf] = func() error { return r.resolveBatchFetch(ctx, f, data, set) }
 			disallowParallelFetch = disallowParallelFetch || f.Fetch.DisallowParallelFetch
 		}
 	}
@@ -1557,31 +1535,34 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	return
 }
 
-func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (err error) {
-	buf := r.getBufPair()
-	set.buffers[fetch.BufferId] = buf
-	err = set.renderInputTemplate(ctx, fetch, data, preparedInput)
-	return
-}
-
-func (r *Resolver) resolveBatchFetch(ctx *Context, fetch *BatchFetch, preparedInput *fastbuffer.FastBuffer, set *resultSet) error {
+func (r *Resolver) resolveBatchFetch(ctx *Context, fetch *BatchFetch, data []byte, set *resultSet) error {
 	if r.dataLoaderEnabled {
 		return ctx.dataLoader.LoadBatch(ctx, fetch, set)
 	}
 
-	buf := set.buffers[fetch.Fetch.BufferId]
-	if err := r.fetcher.FetchBatch(ctx, fetch, []*fastbuffer.FastBuffer{preparedInput}, []*BufPair{buf}); err != nil {
+	preparedInput := r.getBufPair()
+	defer r.freeBufPair(preparedInput)
+	if err := set.renderInputTemplate(ctx, fetch.Fetch, data, preparedInput.Data); err != nil {
 		return err
 	}
 
-	return nil
+	buf := set.buffers[fetch.Fetch.BufferId]
+	return r.fetcher.FetchBatch(ctx, fetch, []*fastbuffer.FastBuffer{preparedInput.Data}, []*BufPair{buf})
 }
 
-func (r *Resolver) resolveSingleFetch(ctx *Context, fetch *SingleFetch, preparedInput *fastbuffer.FastBuffer, set *resultSet) error {
+func (r *Resolver) resolveSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet) error {
 	if r.dataLoaderEnabled && !fetch.DisableDataLoader {
 		return ctx.dataLoader.Load(ctx, fetch, set)
 	}
-	return r.fetcher.Fetch(ctx, fetch, preparedInput, set.buffers[fetch.BufferId])
+
+	preparedInput := r.getBufPair()
+	defer r.freeBufPair(preparedInput)
+	if err := set.renderInputTemplate(ctx, fetch, data, preparedInput.Data); err != nil {
+		return err
+	}
+
+	buf := set.buffers[fetch.BufferId]
+	return r.fetcher.Fetch(ctx, fetch, preparedInput.Data, buf)
 }
 
 type Object struct {
