@@ -1220,7 +1220,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 
 		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
 		searchSkipFieldsFunc := func(_ctx *Context, _ []byte) error {
-			if r.searchSkipFields(_ctx, skipFieldZeroValues, field.Value) {
+			if field.skipRequired(_ctx) || r.searchSkipFields(_ctx, skipFieldZeroValues, field.Value) {
 				skipBufferIds[field.BufferID] = true
 			}
 			if len(skipFieldZeroValues) > 0 {
