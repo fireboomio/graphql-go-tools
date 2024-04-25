@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -1472,7 +1471,7 @@ func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch, set *resultSet) func
 		if err := r.prepareSingleFetch(ctx, fetch, data, set, preparedInput.Data); err != nil {
 			return err
 		}
-		return r.resolveSingleFetch(ctx, fetch, preparedInput.Data, set.buffers[fetch.BufferId])
+		return r.resolveSingleFetch(ctx, fetch, preparedInput.Data, set)
 	}
 }
 
@@ -1483,7 +1482,7 @@ func (r *Resolver) buildBatchFetchFunc(fetch *BatchFetch, set *resultSet) func(*
 		if err := r.prepareSingleFetch(ctx, fetch.Fetch, data, set, preparedInput.Data); err != nil {
 			return err
 		}
-		return r.resolveBatchFetch(ctx, fetch, preparedInput.Data, set.buffers[fetch.Fetch.BufferId])
+		return r.resolveBatchFetch(ctx, fetch, preparedInput.Data, set)
 	}
 }
 
@@ -1514,7 +1513,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 
 			buf := set.buffers[f.BufferId]
 			resolvers[buf] = func() error {
-				return r.resolveSingleFetch(ctx, f, preparedInput.Data, buf)
+				return r.resolveSingleFetch(ctx, f, preparedInput.Data, set)
 			}
 			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
@@ -1531,7 +1530,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 
 			buf := set.buffers[f.Fetch.BufferId]
 			resolvers[buf] = func() error {
-				return r.resolveBatchFetch(ctx, f, preparedInput.Data, buf)
+				return r.resolveBatchFetch(ctx, f, preparedInput.Data, set)
 			}
 			disallowParallelFetch = disallowParallelFetch || f.Fetch.DisallowParallelFetch
 		}
@@ -1561,25 +1560,16 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (err error) {
 	buf := r.getBufPair()
 	set.buffers[fetch.BufferId] = buf
-	inputTemplate := fetch.InputTemplate
-	if skipFieldZeroValues, ok := set.skipBufferFieldZeroValues[fetch.BufferId]; ok && inputTemplate.ResetInputTemplateFunc != nil {
-		skipFieldJsonPaths := make(map[string]bool, len(skipFieldZeroValues))
-		for _, item := range skipFieldZeroValues {
-			skipFieldJsonPaths[strings.Join(item.JsonPath, ".")] = true
-		}
-		inputTemplate = inputTemplate.ResetInputTemplateFunc(ctx, skipFieldJsonPaths)
-	}
-	if err = inputTemplate.Render(ctx, data, preparedInput); err != nil {
-		return
-	}
+	err = set.renderInputTemplate(ctx, fetch, data, preparedInput)
 	return
 }
 
-func (r *Resolver) resolveBatchFetch(ctx *Context, fetch *BatchFetch, preparedInput *fastbuffer.FastBuffer, buf *BufPair) error {
+func (r *Resolver) resolveBatchFetch(ctx *Context, fetch *BatchFetch, preparedInput *fastbuffer.FastBuffer, set *resultSet) error {
 	if r.dataLoaderEnabled {
-		return ctx.dataLoader.LoadBatch(ctx, fetch, buf)
+		return ctx.dataLoader.LoadBatch(ctx, fetch, set)
 	}
 
+	buf := set.buffers[fetch.Fetch.BufferId]
 	if err := r.fetcher.FetchBatch(ctx, fetch, []*fastbuffer.FastBuffer{preparedInput}, []*BufPair{buf}); err != nil {
 		return err
 	}
@@ -1587,11 +1577,11 @@ func (r *Resolver) resolveBatchFetch(ctx *Context, fetch *BatchFetch, preparedIn
 	return nil
 }
 
-func (r *Resolver) resolveSingleFetch(ctx *Context, fetch *SingleFetch, preparedInput *fastbuffer.FastBuffer, buf *BufPair) error {
+func (r *Resolver) resolveSingleFetch(ctx *Context, fetch *SingleFetch, preparedInput *fastbuffer.FastBuffer, set *resultSet) error {
 	if r.dataLoaderEnabled && !fetch.DisableDataLoader {
-		return ctx.dataLoader.Load(ctx, fetch, buf)
+		return ctx.dataLoader.Load(ctx, fetch, set)
 	}
-	return r.fetcher.Fetch(ctx, fetch, preparedInput, buf)
+	return r.fetcher.Fetch(ctx, fetch, preparedInput, set.buffers[fetch.BufferId])
 }
 
 type Object struct {

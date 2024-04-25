@@ -150,10 +150,10 @@ type dataLoader struct {
 }
 
 // Load fetches concurrently data for all siblings.
-func (d *dataLoader) Load(ctx *Context, fetch *SingleFetch, responsePair *BufPair) (err error) {
+func (d *dataLoader) Load(ctx *Context, fetch *SingleFetch, set *resultSet) (err error) {
 	var fetchResult fetchState
 	var resultPair *BufPair
-
+	responsePair := set.buffers[fetch.BufferId]
 	fetchResult, ok := d.getFetchState(fetch.BufferId)
 	if ok {
 		resultPair, err = fetchResult.next(ctx)
@@ -168,9 +168,8 @@ func (d *dataLoader) Load(ctx *Context, fetch *SingleFetch, responsePair *BufPai
 	if !ok { // it must be root query without subscription data
 		buf := d.resourceProvider.getBufPair()
 		defer d.resourceProvider.freeBufPair(buf)
-
-		if err := fetch.InputTemplate.Render(ctx, nil, buf.Data); err != nil {
-			return err
+		if err = set.renderInputTemplate(ctx, fetch, nil, buf.Data); err != nil {
+			return
 		}
 
 		pair := d.getResultBufPair()
@@ -192,7 +191,7 @@ func (d *dataLoader) Load(ctx *Context, fetch *SingleFetch, responsePair *BufPai
 		return err
 	}
 
-	if fetchResult, err = d.resolveSingleFetch(ctx, fetch, fetchParams); err != nil {
+	if fetchResult, err = d.resolveSingleFetch(ctx, fetch, fetchParams, set); err != nil {
 		return err
 	}
 
@@ -205,9 +204,10 @@ func (d *dataLoader) Load(ctx *Context, fetch *SingleFetch, responsePair *BufPai
 }
 
 // LoadBatch builds and resolve batch request for all siblings.
-func (d *dataLoader) LoadBatch(ctx *Context, batchFetch *BatchFetch, responsePair *BufPair) (err error) {
+func (d *dataLoader) LoadBatch(ctx *Context, batchFetch *BatchFetch, set *resultSet) (err error) {
 	var fetchResult fetchState
 	var resultPair *BufPair
+	responsePair := set.buffers[batchFetch.Fetch.BufferId]
 	fetchResult, ok := d.getFetchState(batchFetch.Fetch.BufferId)
 	if ok {
 		resultPair, err = fetchResult.next(ctx)
@@ -227,7 +227,7 @@ func (d *dataLoader) LoadBatch(ctx *Context, batchFetch *BatchFetch, responsePai
 		return err
 	}
 
-	if fetchResult, err = d.resolveBatchFetch(ctx, batchFetch, fetchParams); err != nil {
+	if fetchResult, err = d.resolveBatchFetch(ctx, batchFetch, fetchParams, set); err != nil {
 		return err
 	}
 
@@ -238,7 +238,7 @@ func (d *dataLoader) LoadBatch(ctx *Context, batchFetch *BatchFetch, responsePai
 	return
 }
 
-func (d *dataLoader) resolveBatchFetch(ctx *Context, batchFetch *BatchFetch, fetchParams [][]byte) (fetchState *batchFetchState, err error) {
+func (d *dataLoader) resolveBatchFetch(ctx *Context, batchFetch *BatchFetch, fetchParams [][]byte, set *resultSet) (fetchState *batchFetchState, err error) {
 	inputBufs := make([]*fastbuffer.FastBuffer, 0, len(fetchParams))
 
 	bufSlice := d.resourceProvider.getBufPairSlicePool()
@@ -247,8 +247,8 @@ func (d *dataLoader) resolveBatchFetch(ctx *Context, batchFetch *BatchFetch, fet
 	for i := range fetchParams {
 		bufPair := d.resourceProvider.getBufPair()
 		*bufSlice = append(*bufSlice, bufPair)
-		if err := batchFetch.Fetch.InputTemplate.Render(ctx, fetchParams[i], bufPair.Data); err != nil {
-			return nil, err
+		if err = set.renderInputTemplate(ctx, batchFetch.Fetch, fetchParams[i], bufPair.Data); err != nil {
+			return
 		}
 
 		inputBufs = append(inputBufs, bufPair.Data)
@@ -274,7 +274,7 @@ func (d *dataLoader) resolveBatchFetch(ctx *Context, batchFetch *BatchFetch, fet
 	return fetchState, nil
 }
 
-func (d *dataLoader) resolveSingleFetch(ctx *Context, fetch *SingleFetch, fetchParams [][]byte) (fetchState *singleFetchState, err error) {
+func (d *dataLoader) resolveSingleFetch(ctx *Context, fetch *SingleFetch, fetchParams [][]byte, set *resultSet) (fetchState *singleFetchState, err error) {
 	wg := d.resourceProvider.getWaitGroup()
 	defer d.resourceProvider.freeWaitGroup(wg)
 
@@ -294,8 +294,8 @@ func (d *dataLoader) resolveSingleFetch(ctx *Context, fetch *SingleFetch, fetchP
 	for i, val := range fetchParams {
 		bufPair := d.resourceProvider.getBufPair()
 		*bufSlice = append(*bufSlice, bufPair)
-		if err := fetch.InputTemplate.Render(ctx, val, bufPair.Data); err != nil {
-			return nil, err
+		if err = set.renderInputTemplate(ctx, fetch, val, bufPair.Data); err != nil {
+			return
 		}
 
 		pair := d.getResultBufPair()

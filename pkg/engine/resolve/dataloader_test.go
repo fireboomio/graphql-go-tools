@@ -41,7 +41,8 @@ func TestDataLoader_Load(t *testing.T) {
 			t.Helper()
 
 			bufPair := NewBufPair()
-			err := dl.Load(ctx, fetch, bufPair)
+			set := &resultSet{buffers: map[int]*BufPair{fetch.BufferId: bufPair}}
+			err := dl.Load(ctx, fetch, set)
 			assert.NoError(t, err)
 			assert.Equal(t, expectedOutput, bufPair.Data.String())
 			ctrl.Finish()
@@ -62,7 +63,8 @@ func TestDataLoader_Load(t *testing.T) {
 			t.Helper()
 
 			bufPair := NewBufPair()
-			err := dl.Load(ctx, fetch, bufPair)
+			set := &resultSet{buffers: map[int]*BufPair{fetch.BufferId: bufPair}}
+			err := dl.Load(ctx, fetch, set)
 			assert.EqualError(t, err, expectedErr)
 			ctrl.Finish()
 		}
@@ -185,11 +187,12 @@ func TestDataLoader_Load(t *testing.T) {
 			}).
 			Return(nil)
 
-		bufPair := NewBufPair()
+		bufferId := 2
+		set := &resultSet{buffers: map[int]*BufPair{bufferId: NewBufPair()}}
 		err := dl.Load(
 			&Context{Context: context.Background(), lastFetchID: 1, responseElements: []string{"someProp"}},
 			&SingleFetch{
-				BufferId: 2,
+				BufferId: bufferId,
 				InputTemplate: InputTemplate{
 					Segments: []TemplateSegment{
 						{
@@ -210,7 +213,7 @@ func TestDataLoader_Load(t *testing.T) {
 				},
 				DataSource: userService,
 			},
-			bufPair,
+			set,
 		)
 
 		assert.NoError(t, err)
@@ -443,10 +446,10 @@ func TestDataLoader_LoadBatch(t *testing.T) {
 		}
 
 		fetch, ctx, expectedOutput := fn(t, ctrl)
-
 		return func(t *testing.T) {
 			bufPair := NewBufPair()
-			err := dl.LoadBatch(ctx, fetch, bufPair)
+			set := &resultSet{buffers: map[int]*BufPair{fetch.Fetch.BufferId: bufPair}}
+			err := dl.LoadBatch(ctx, fetch, set)
 			assert.NoError(t, err)
 			assert.Equal(t, expectedOutput, bufPair.Data.String())
 			ctrl.Finish()
@@ -647,11 +650,13 @@ func TestDataLoader_LoadBatch(t *testing.T) {
 			}).
 			Return(expErr)
 
+		bufferId := 2
+		set := &resultSet{buffers: map[int]*BufPair{bufferId: NewBufPair()}}
 		err := dl.LoadBatch(
 			&Context{Context: context.Background(), lastFetchID: 1, responseElements: []string{"someProp"}},
 			&BatchFetch{
 				Fetch: &SingleFetch{
-					BufferId: 2,
+					BufferId: bufferId,
 					InputTemplate: InputTemplate{
 						Segments: []TemplateSegment{
 							{
@@ -674,7 +679,7 @@ func TestDataLoader_LoadBatch(t *testing.T) {
 				},
 				BatchFactory: batchFactory,
 			},
-			NewBufPair(),
+			set,
 		)
 
 		assert.EqualError(t, err, expErr.Error())

@@ -3,6 +3,7 @@ package resolve
 import (
 	"fmt"
 	"github.com/buger/jsonparser"
+	"github.com/wundergraph/graphql-go-tools/pkg/fastbuffer"
 	"golang.org/x/exp/slices"
 	"strings"
 )
@@ -134,4 +135,16 @@ func (f *Field) SetWaitExportedRequired(exportedVariables []string) {
 		})
 	}
 	return
+}
+
+func (s *resultSet) renderInputTemplate(ctx *Context, fetch *SingleFetch, data []byte, preparedInput *fastbuffer.FastBuffer) error {
+	inputTemplate := fetch.InputTemplate
+	if skipFieldZeroValues, ok := s.skipBufferFieldZeroValues[fetch.BufferId]; ok && inputTemplate.ResetInputTemplateFunc != nil {
+		skipFieldJsonPaths := make(map[string]bool, len(skipFieldZeroValues))
+		for _, item := range skipFieldZeroValues {
+			skipFieldJsonPaths[strings.Join(item.JsonPath, ".")] = true
+		}
+		inputTemplate = inputTemplate.ResetInputTemplateFunc(ctx, skipFieldJsonPaths)
+	}
+	return inputTemplate.Render(ctx, data, preparedInput)
 }
