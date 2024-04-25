@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/exp/slices"
-
 	"github.com/buger/jsonparser"
 	"github.com/cespare/xxhash/v2"
 	"github.com/tidwall/gjson"
@@ -93,6 +91,7 @@ type NodeSkip interface {
 
 type NodeZeroValue struct {
 	Path      []string
+	JsonPath  []string
 	ZeroValue []byte
 }
 
@@ -1186,121 +1185,6 @@ func (r *Resolver) addResolveError(ctx *Context, objectBuf *BufPair) {
 	objectBuf.WriteErr(unableToResolveMsg, locations.Bytes(), pathBytes, nil)
 }
 
-func (r *Resolver) resolveSkipField(ctx *Context, field *Field) (skip bool) {
-	if skipDirective := field.SkipDirective; skipDirective.Defined {
-		var skipEffective []bool
-		if ifName := skipDirective.VariableName; len(ifName) > 0 {
-			skip, skipErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-			skipEffective = append(skipEffective, skipErr == nil && skip)
-		}
-		if expression := skipDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
-			if skipDirective.ExpressionIsVariable {
-				expression, _ = jsonparser.GetString(ctx.Variables, expression)
-			}
-			skipEffective = append(skipEffective, ctx.RuleEvaluate(ctx.Variables, expression))
-		}
-		if skip = !slices.Contains(skipEffective, false); skip {
-			return
-		}
-	}
-	if includeDirective := field.IncludeDirective; includeDirective.Defined {
-		var skipEffective []bool
-		if ifName := includeDirective.VariableName; len(ifName) > 0 {
-			include, includeErr := jsonparser.GetBoolean(ctx.Variables, ifName)
-			skipEffective = append(skipEffective, includeErr != nil || !include)
-		}
-		if expression := includeDirective.Expression; len(expression) > 0 && ctx.RuleEvaluate != nil {
-			if includeDirective.ExpressionIsVariable {
-				expression, _ = jsonparser.GetString(ctx.Variables, expression)
-			}
-			skipEffective = append(skipEffective, !ctx.RuleEvaluate(ctx.Variables, expression))
-		}
-		if skip = !slices.Contains(skipEffective, false); skip {
-			return
-		}
-	}
-	return
-}
-
-func (r *Resolver) resolveSkipFieldExportRequired(ctx *Context, exportedVariables []string, skipDirectives ...SkipDirective) (required, defined bool) {
-	if defined = slices.ContainsFunc(skipDirectives, func(directive SkipDirective) bool { return directive.Defined }); !defined {
-		return
-	}
-
-	required = slices.ContainsFunc(skipDirectives, func(directive SkipDirective) bool {
-		return directive.Defined && slices.ContainsFunc(exportedVariables, func(exported string) bool {
-			if len(directive.VariableName) > 0 && directive.VariableName == exported {
-				return true
-			}
-			if expression := directive.Expression; len(expression) > 0 {
-				if directive.ExpressionIsVariable {
-					expression, _ = jsonparser.GetString(ctx.Variables, expression)
-				}
-				if strings.Contains(expression, fmt.Sprintf("arguments.%s", exported)) {
-					return true
-				}
-			}
-			return false
-		})
-	})
-	return
-}
-
-func (r *Resolver) searchSkipBufferFieldPaths(ctx *Context, skipFieldZeroValues map[*Field]*NodeZeroValue, exportedVariables []string, node Node, parent ...string) (skipFieldJsonPaths map[string]bool, skipAll bool) {
-	switch ret := node.(type) {
-	case *Array:
-		skipFieldJsonPaths, skipAll = r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, ret.Item, parent...)
-	case *Object:
-		objectPath := append(parent, ret.NodePath()...)
-		objectSkipCount, objectPathLength := 0, len(objectPath)
-		skipFieldJsonPaths = make(map[string]bool)
-		addObjectSkipJsonPathFunc := func(itemField *Field, itemSkipAll bool) {
-			nodeSkip, ok := itemField.Value.(NodeSkip)
-			if !ok {
-				return
-			}
-			var itemPath []string
-			zeroValue := &NodeZeroValue{
-				Path:      nodeSkip.NodePath(),
-				ZeroValue: nodeSkip.NodeZeroValue(itemSkipAll),
-			}
-			if nodeSkipPathLen := len(zeroValue.Path); nodeSkipPathLen > 0 {
-				itemPath = make([]string, objectPathLength+nodeSkipPathLen)
-				copy(itemPath, objectPath)
-				copy(itemPath[objectPathLength:], zeroValue.Path)
-			} else {
-				itemPath = objectPath
-			}
-			objectSkipCount++
-			skipFieldZeroValues[itemField] = zeroValue
-			skipFieldJsonPaths[strings.Join(itemPath, ".")] = true
-		}
-		for _, item := range ret.Fields {
-			if item.HasBuffer {
-				continue
-			}
-			exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, item.SkipDirective, SkipDirective(item.IncludeDirective))
-			if exportRequired {
-				continue
-			}
-
-			if skipDefined && r.resolveSkipField(ctx, item) {
-				addObjectSkipJsonPathFunc(item, false)
-				continue
-			}
-
-			itemSkipJsonPaths, itemSkipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, item.Value, objectPath...)
-			if itemSkipAll {
-				addObjectSkipJsonPathFunc(item, true)
-			} else {
-				maps.Copy(skipFieldJsonPaths, itemSkipJsonPaths)
-			}
-		}
-		skipAll = objectSkipCount == len(ret.Fields)
-	}
-	return
-}
-
 func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, objectBuf *BufPair) (err error) {
 	if len(object.Path) != 0 {
 		data, _, _, _ = jsonparser.Get(data, object.Path...)
@@ -1326,67 +1210,38 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
-	var exportedVariables []string
-	skipFields, delaySkipFieldFuncs := make(map[int]bool), make(map[int]func(*Context) bool)
-	skipBuffers, delayBufferFuncs := make(map[int]bool), make(map[int]func(*Context) error)
-	skipBuffersFieldJsonPaths, skipBuffersFieldZeroValues := make(map[int]map[string]bool), make(map[int]map[*Field]*NodeZeroValue)
-	defer func() {
-		maps.Clear(skipFields)
-		maps.Clear(delaySkipFieldFuncs)
-		maps.Clear(skipBuffersFieldZeroValues)
-	}()
-	addSkipBuffersFieldPathsFunc := func(index int, field *Field) {
-		if !field.HasBuffer {
-			return
-		}
-		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
-		skipFieldJsonPaths, skipAll := r.searchSkipBufferFieldPaths(ctx, skipFieldZeroValues, exportedVariables, field.Value)
-		if skipAll {
-			skipFields[index] = true
-			skipBuffers[field.BufferID] = true
-			return
-		}
-		if len(skipFieldJsonPaths) > 0 {
-			skipBuffersFieldJsonPaths[field.BufferID] = skipFieldJsonPaths
-		}
-		if len(skipFieldZeroValues) > 0 {
-			skipBuffersFieldZeroValues[field.BufferID] = skipFieldZeroValues
-		}
-	}
+	skipBufferIds, delayFetchBufferFuncs := make(map[int]bool), make(map[int]func(*Context, []byte) error)
+	skipBufferFieldZeroValues := make(map[int]map[*Field]*NodeZeroValue)
 	for i := range object.Fields {
 		field := object.Fields[i]
-		if export, ok := field.Value.(FieldExportVariable); ok {
-			exportedVariables = append(exportedVariables, export.ExportedVariables()...)
-		}
-		exportRequired, skipDefined := r.resolveSkipFieldExportRequired(ctx, exportedVariables, field.SkipDirective, SkipDirective(field.IncludeDirective))
-		if !skipDefined {
-			addSkipBuffersFieldPathsFunc(i, field)
+		if !field.HasBuffer {
 			continue
 		}
-		if exportRequired {
-			delaySkipFieldFuncs[i] = func(_ctx *Context) bool { return r.resolveSkipField(_ctx, field) }
-			if field.HasBuffer {
-				delayBufferFuncs[field.BufferID] = nil
+
+		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
+		searchSkipFieldsFunc := func(_ctx *Context, _ []byte) error {
+			if r.searchSkipFields(_ctx, skipFieldZeroValues, field.Value) {
+				skipBufferIds[field.BufferID] = true
 			}
-			continue
-		}
-		if r.resolveSkipField(ctx, field) {
-			skipFields[i] = true
-			if field.HasBuffer {
-				skipBuffers[field.BufferID] = true
+			if len(skipFieldZeroValues) > 0 {
+				skipBufferFieldZeroValues[field.BufferID] = skipFieldZeroValues
 			}
-			continue
+			return nil
 		}
-		addSkipBuffersFieldPathsFunc(i, field)
+		if field.WaitExportedRequired || field.WaitExportedRequiredFunc != nil && field.WaitExportedRequiredFunc(ctx) {
+			delayFetchBufferFuncs[field.BufferID] = searchSkipFieldsFunc
+		} else {
+			_ = searchSkipFieldsFunc(ctx, nil)
+		}
 	}
 
 	var set *resultSet
 	if object.Fetch != nil {
 		set = r.getResultSet()
 		defer r.freeResultSet(set)
-		set.skipBuffers = skipBuffers
-		set.delayBufferFuncs = delayBufferFuncs
-		set.skipBuffersFieldJsonPaths = skipBuffersFieldJsonPaths
+		set.skipBufferIds = skipBufferIds
+		set.delayFetchBufferFuncs = delayFetchBufferFuncs
+		set.skipBufferFieldZeroValues = skipBufferFieldZeroValues
 		if err = r.resolveFetch(ctx, object.Fetch, data, set); err != nil {
 			return
 		}
@@ -1404,23 +1259,18 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	typeNameSkip := false
 	first := true
 	skipCount := 0
-	for i, field := range object.Fields {
-		if _, ok := skipFields[i]; ok {
-			skipCount++
-			continue
-		}
-		if skipFunc, ok := delaySkipFieldFuncs[i]; ok && skipFunc(ctx) {
-			skipCount++
-			continue
-		}
-
+	for _, field := range object.Fields {
 		var fieldData []byte
 		if set != nil && field.HasBuffer {
-			if delayFunc, ok := delayBufferFuncs[field.BufferID]; ok && delayFunc != nil {
-				if err = delayFunc(ctx); err != nil {
+			if delayFunc, ok := delayFetchBufferFuncs[field.BufferID]; ok && delayFunc != nil {
+				if err = delayFunc(ctx, data); err != nil {
 					return
 				}
 				r.MergeBufPairErrors(set.buffers[field.BufferID], objectBuf)
+			}
+			if _, skip := skipBufferIds[field.BufferID]; skip {
+				skipCount++
+				continue
 			}
 			buffer, ok := set.buffers[field.BufferID]
 			if ok {
@@ -1428,18 +1278,23 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				ctx.resetResponsePathElements()
 				ctx.lastFetchID = field.BufferID
 			}
-		} else if nodeZero, ok := ctx.skipFieldZeroValues[field]; ok {
-			if nodeZero.ZeroValue == nil {
+		} else {
+			if nodeZero, ok := ctx.skipFieldZeroValues[field]; ok {
+				if nodeZero.ZeroValue == nil {
+					skipCount++
+					continue
+				}
+				if len(nodeZero.Path) > 0 {
+					fieldData, _ = jsonparser.Set(data, nodeZero.ZeroValue, nodeZero.Path...)
+				} else {
+					fieldData = nodeZero.ZeroValue
+				}
+			} else if field.skipRequired(ctx) {
 				skipCount++
 				continue
-			}
-			if len(nodeZero.Path) > 0 {
-				fieldData, _ = jsonparser.Set(data, nodeZero.ZeroValue, nodeZero.Path...)
 			} else {
-				fieldData = nodeZero.ZeroValue
+				fieldData = data
 			}
-		} else {
-			fieldData = data
 		}
 
 		if field.OnTypeName != nil {
@@ -1466,7 +1321,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		ctx.addPathElement(field.Name)
 		ctx.setPosition(field.Position)
 		if field.HasBuffer {
-			ctx.skipFieldZeroValues = skipBuffersFieldZeroValues[field.BufferID]
+			ctx.skipFieldZeroValues = skipBufferFieldZeroValues[field.BufferID]
 		}
 		err = r.resolveNode(ctx, field.Value, fieldData, fieldBuf)
 		if field.HasBuffer {
@@ -1553,14 +1408,14 @@ func (r *Resolver) freeResultSet(set *resultSet) {
 		r.bufPairPool.Put(set.buffers[i])
 		delete(set.buffers, i)
 	}
-	for i := range set.skipBuffers {
-		delete(set.skipBuffers, i)
+	for i := range set.skipBufferIds {
+		delete(set.skipBufferIds, i)
 	}
-	for i := range set.delayBufferFuncs {
-		delete(set.delayBufferFuncs, i)
+	for i := range set.delayFetchBufferFuncs {
+		delete(set.delayFetchBufferFuncs, i)
 	}
-	for i := range set.skipBuffersFieldJsonPaths {
-		delete(set.skipBuffersFieldJsonPaths, i)
+	for i := range set.skipBufferFieldZeroValues {
+		delete(set.skipBufferFieldZeroValues, i)
 	}
 	r.resultSetPool.Put(set)
 }
@@ -1573,52 +1428,60 @@ func (r *Resolver) resolveFetch(ctx *Context, fetch Fetch, data []byte, set *res
 
 	switch f := fetch.(type) {
 	case *SingleFetch:
-		fetchFunc, skip := r.buildResolveFetchFunc(f, data, set, r.buildSingleFetchFunc(f))
-		if skip {
+		singleFetchFunc := r.buildSingleFetchFunc(f, set)
+		if skip := r.skipOrSetDelayFunc(f, set, singleFetchFunc); skip {
 			return
 		}
-		err = fetchFunc(ctx)
+		err = singleFetchFunc(ctx, data)
 	case *BatchFetch:
-		fetchFunc, skip := r.buildResolveFetchFunc(f.Fetch, data, set, r.buildBatchFetchFunc(f))
-		if skip {
+		batchFetchFunc := r.buildBatchFetchFunc(f, set)
+		if skip := r.skipOrSetDelayFunc(f.Fetch, set, batchFetchFunc); skip {
 			return
 		}
-		err = fetchFunc(ctx)
+		err = batchFetchFunc(ctx, data)
 	case *ParallelFetch:
 		err = r.resolveParallelFetch(ctx, f, data, set)
 	}
 	return
 }
 
-func (r *Resolver) buildResolveFetchFunc(fetch *SingleFetch, data []byte, set *resultSet,
-	resolveFetch func(*Context, *fastbuffer.FastBuffer, *BufPair) error) (fetchFunc func(ctx *Context) error, skip bool) {
-	if _, skip = set.skipBuffers[fetch.BufferId]; skip {
+func (r *Resolver) skipOrSetDelayFunc(fetch *SingleFetch, set *resultSet, fetchFunc func(*Context, []byte) error) (skip bool) {
+	if _, skip = set.skipBufferIds[fetch.BufferId]; skip {
 		return
 	}
 
-	fetchFunc = func(ctx *Context) error {
+	delayFunc, skip := set.delayFetchBufferFuncs[fetch.BufferId]
+	if skip {
+		set.delayFetchBufferFuncs[fetch.BufferId] = func(ctx *Context, data []byte) error {
+			_ = delayFunc(ctx, data)
+			if _, skip = set.skipBufferIds[fetch.BufferId]; skip {
+				return nil
+			}
+			return fetchFunc(ctx, data)
+		}
+	}
+	return
+}
+
+func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch, set *resultSet) func(*Context, []byte) error {
+	return func(ctx *Context, data []byte) error {
 		preparedInput := r.getBufPair()
 		defer r.freeBufPair(preparedInput)
 		if err := r.prepareSingleFetch(ctx, fetch, data, set, preparedInput.Data); err != nil {
 			return err
 		}
-		return resolveFetch(ctx, preparedInput.Data, set.buffers[fetch.BufferId])
-	}
-	if _, skip = set.delayBufferFuncs[fetch.BufferId]; skip {
-		set.delayBufferFuncs[fetch.BufferId] = fetchFunc
-	}
-	return
-}
-
-func (r *Resolver) buildSingleFetchFunc(fetch *SingleFetch) func(*Context, *fastbuffer.FastBuffer, *BufPair) error {
-	return func(ctx *Context, buffer *fastbuffer.FastBuffer, pair *BufPair) error {
-		return r.resolveSingleFetch(ctx, fetch, buffer, pair)
+		return r.resolveSingleFetch(ctx, fetch, preparedInput.Data, set.buffers[fetch.BufferId])
 	}
 }
 
-func (r *Resolver) buildBatchFetchFunc(fetch *BatchFetch) func(*Context, *fastbuffer.FastBuffer, *BufPair) error {
-	return func(ctx *Context, buffer *fastbuffer.FastBuffer, pair *BufPair) error {
-		return r.resolveBatchFetch(ctx, fetch, buffer, pair)
+func (r *Resolver) buildBatchFetchFunc(fetch *BatchFetch, set *resultSet) func(*Context, []byte) error {
+	return func(ctx *Context, data []byte) error {
+		preparedInput := r.getBufPair()
+		defer r.freeBufPair(preparedInput)
+		if err := r.prepareSingleFetch(ctx, fetch.Fetch, data, set, preparedInput.Data); err != nil {
+			return err
+		}
+		return r.resolveBatchFetch(ctx, fetch, preparedInput.Data, set.buffers[fetch.Fetch.BufferId])
 	}
 }
 
@@ -1636,7 +1499,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 		wg.Add(1)
 		switch f := fetch.Fetches[i].(type) {
 		case *SingleFetch:
-			if _, skip := r.buildResolveFetchFunc(f, data, set, r.buildSingleFetchFunc(f)); skip {
+			if skip := r.skipOrSetDelayFunc(f, set, r.buildSingleFetchFunc(f, set)); skip {
 				wg.Done()
 				continue
 			}
@@ -1653,7 +1516,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 			}
 			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
-			if _, skip := r.buildResolveFetchFunc(f.Fetch, data, set, r.buildBatchFetchFunc(f)); skip {
+			if skip := r.skipOrSetDelayFunc(f.Fetch, set, r.buildBatchFetchFunc(f, set)); skip {
 				wg.Done()
 				continue
 			}
@@ -1696,11 +1559,16 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 func (r *Resolver) prepareSingleFetch(ctx *Context, fetch *SingleFetch, data []byte, set *resultSet, preparedInput *fastbuffer.FastBuffer) (err error) {
 	buf := r.getBufPair()
 	set.buffers[fetch.BufferId] = buf
-	if err = fetch.InputTemplate.Render(ctx, data, preparedInput); err != nil {
-		return
+	inputTemplate := fetch.InputTemplate
+	if skipFieldZeroValues, ok := set.skipBufferFieldZeroValues[fetch.BufferId]; ok && inputTemplate.ResetInputTemplateFunc != nil {
+		skipFieldJsonPaths := make(map[string]bool, len(skipFieldZeroValues))
+		for _, item := range skipFieldZeroValues {
+			skipFieldJsonPaths[strings.Join(item.JsonPath, ".")] = true
+		}
+		inputTemplate = inputTemplate.ResetInputTemplateFunc(ctx, skipFieldJsonPaths)
 	}
-	if skipFieldPaths, ok := set.skipBuffersFieldJsonPaths[fetch.BufferId]; ok {
-		ctx.Context = context.WithValue(ctx.Context, fmt.Sprintf(skipFieldJsonPathsFormat, string(preparedInput.Bytes())), skipFieldPaths)
+	if err = inputTemplate.Render(ctx, data, preparedInput); err != nil {
+		return
 	}
 	return
 }
@@ -1769,16 +1637,18 @@ func (_ *EmptyArray) NodeKind() NodeKind {
 }
 
 type Field struct {
-	Name             []byte
-	Value            Node
-	Position         Position
-	Defer            *DeferField
-	Stream           *StreamField
-	HasBuffer        bool
-	BufferID         int
-	OnTypeName       []byte
-	SkipDirective    SkipDirective
-	IncludeDirective IncludeDirective
+	Name                     []byte
+	Value                    Node
+	Position                 Position
+	Defer                    *DeferField
+	Stream                   *StreamField
+	HasBuffer                bool
+	BufferID                 int
+	OnTypeName               []byte
+	SkipDirective            SkipDirective
+	IncludeDirective         IncludeDirective
+	WaitExportedRequired     bool
+	WaitExportedRequiredFunc func(*Context) bool
 
 	// deprecated, only test on use
 	SkipDirectiveDefined bool
@@ -1826,23 +1696,24 @@ func (_ *Null) NodeKind() NodeKind {
 
 type resultSet struct {
 	buffers                   map[int]*BufPair
-	skipBuffers               map[int]bool
-	skipBuffersFieldJsonPaths map[int]map[string]bool
-	delayBufferFuncs          map[int]func(*Context) error
+	skipBufferIds             map[int]bool
+	delayFetchBufferFuncs     map[int]func(*Context, []byte) error
+	skipBufferFieldZeroValues map[int]map[*Field]*NodeZeroValue
 }
 
 type SingleFetch struct {
-	BufferId   int
-	Input      string
-	DataSource DataSource
-	Variables  Variables
+	BufferId       int
+	Input          string
+	ResetInputFunc func(*Context, map[string]bool) string
+	DataSource     DataSource
+	Variables      Variables
 	// DisallowSingleFlight is used for write operations like mutations, POST, DELETE etc. to disable singleFlight
 	// By default SingleFlight for fetches is disabled and needs to be enabled on the Resolver first
 	// If the resolver allows SingleFlight it's up to each individual DataSource Planner to decide whether an Operation
 	// should be allowed to use SingleFlight
 	DisallowSingleFlight  bool
-	DisableDataLoader     bool
 	DisallowParallelFetch bool
+	DisableDataLoader     bool
 	InputTemplate         InputTemplate
 	DataSourceIdentifier  []byte
 	ProcessResponseConfig ProcessResponseConfig

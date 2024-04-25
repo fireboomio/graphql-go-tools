@@ -62,6 +62,7 @@ func (d *ProcessDataSource) traverseTrigger(trigger *resolve.GraphQLSubscription
 }
 
 func (d *ProcessDataSource) traverseSingleFetch(fetch *resolve.SingleFetch) {
+	d.setResetInputTemplateFunc(fetch)
 	d.resolveInputTemplate(fetch.Variables, fetch.Input, &fetch.InputTemplate)
 	fetch.Input = ""
 	fetch.Variables = nil
@@ -70,35 +71,45 @@ func (d *ProcessDataSource) traverseSingleFetch(fetch *resolve.SingleFetch) {
 }
 
 func (d *ProcessDataSource) resolveInputTemplate(variables resolve.Variables, input string, template *resolve.InputTemplate) {
-
 	if input == "" {
 		return
 	}
 
 	if !strings.Contains(input, "$$") {
-		template.Segments = append(template.Segments, resolve.TemplateSegment{
-			SegmentType: resolve.StaticSegmentType,
-			Data:        []byte(input),
-		})
+		template.AddStaticTemplateSegment(input)
 		return
 	}
 
-	segments := strings.Split(input, "$$")
-
 	isVariable := false
-	for _, seg := range segments {
+	segments := strings.Split(input, "$$")
+	for _, segment := range segments {
 		switch {
 		case isVariable:
-			i, _ := strconv.Atoi(seg)
-			variableTemplateSegment := (variables)[i].TemplateSegment()
-			template.Segments = append(template.Segments, variableTemplateSegment)
+			i, _ := strconv.Atoi(segment)
+			template.AddTemplateSegment((variables)[i].TemplateSegment())
 			isVariable = false
 		default:
-			template.Segments = append(template.Segments, resolve.TemplateSegment{
-				SegmentType: resolve.StaticSegmentType,
-				Data:        []byte(seg),
-			})
+			template.AddStaticTemplateSegment(segment)
 			isVariable = true
 		}
 	}
+}
+
+func (d *ProcessDataSource) setResetInputTemplateFunc(fetch *resolve.SingleFetch) {
+	resetInputFunc := fetch.ResetInputFunc
+	if resetInputFunc == nil {
+		return
+	}
+
+	variables := fetch.Variables
+	fetch.InputTemplate.ResetInputTemplateFunc = func(ctx *resolve.Context, data map[string]bool) resolve.InputTemplate {
+		inputTemplate := resolve.InputTemplate{}
+		inputTemplate.SetTemplateOutputToNullOnVariableNull = fetch.InputTemplate.SetTemplateOutputToNullOnVariableNull
+		d.resolveInputTemplate(variables, resetInputFunc(ctx, data), &inputTemplate)
+		if len(inputTemplate.Segments) == 0 {
+			inputTemplate = fetch.InputTemplate
+		}
+		return inputTemplate
+	}
+	fetch.ResetInputFunc = nil
 }

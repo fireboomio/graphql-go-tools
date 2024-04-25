@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/exp/maps"
 	"reflect"
 	"regexp"
 	"strings"
@@ -372,7 +373,8 @@ type Visitor struct {
 	OperationName                string
 	operationDefinition          int
 	objects                      []*resolve.Object
-	currentFields                []objectFields
+	currentFieldIndexes          map[int]int
+	currentFields                []objectField
 	currentField                 *resolve.Field
 	planners                     []plannerConfiguration
 	fetchConfigurations          []objectFetchConfiguration
@@ -385,9 +387,10 @@ type Visitor struct {
 	disableResolveFieldPositions bool
 }
 
-type objectFields struct {
-	popOnField int
-	fields     *[]*resolve.Field
+type objectField struct {
+	popFieldRef int
+	popField    *resolve.Field
+	fields      *[]*resolve.Field
 }
 
 type objectFetchConfiguration struct {
@@ -526,6 +529,7 @@ func (v *Visitor) EnterField(ref int) {
 			SkipDirective:    skip,
 			IncludeDirective: include,
 		}
+		v.currentField.SetWaitExportedRequired(maps.Keys(v.exportedVariables))
 		*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 		return
 	}
@@ -562,7 +566,6 @@ func (v *Visitor) EnterField(ref int) {
 
 	v.currentField = &resolve.Field{
 		Name:             fieldAliasOrName,
-		Value:            v.resolveFieldValue(ref, fieldDefinitionType, true, path),
 		HasBuffer:        hasBuffer,
 		BufferID:         bufferID,
 		OnTypeName:       v.resolveOnTypeName(),
@@ -570,7 +573,8 @@ func (v *Visitor) EnterField(ref int) {
 		SkipDirective:    skip,
 		IncludeDirective: include,
 	}
-
+	v.currentField.SetWaitExportedRequired(maps.Keys(v.exportedVariables))
+	v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionType, true, path)
 	*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 
 	typeName := v.Walker.EnclosingTypeDefinition.NameString(v.Definition)
@@ -662,7 +666,8 @@ func (v *Visitor) resolveOnTypeName() []byte {
 }
 
 func (v *Visitor) LeaveField(ref int) {
-	if v.currentFields[len(v.currentFields)-1].popOnField == ref {
+	v.resetWaitExportedRequired(ref)
+	if v.currentFields[len(v.currentFields)-1].popFieldRef == ref {
 		v.currentFields = v.currentFields[:len(v.currentFields)-1]
 	}
 	fieldDefinition, ok := v.Walker.FieldDefinition(ref)
@@ -765,10 +770,13 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 				UnescapeResponseJson: unescapeResponseJson,
 			}
 			v.objects = append(v.objects, object)
+			popField := v.currentField
 			v.Walker.Defer(func() {
-				v.currentFields = append(v.currentFields, objectFields{
-					popOnField: fieldRef,
-					fields:     &object.Fields,
+				v.currentFieldIndexes[fieldRef] = len(v.currentFields)
+				v.currentFields = append(v.currentFields, objectField{
+					popFieldRef: fieldRef,
+					popField:    popField,
+					fields:      &object.Fields,
 				})
 			})
 			return object
@@ -869,9 +877,9 @@ func (v *Visitor) EnterOperationDefinition(ref int) {
 	}
 
 	v.objects = append(v.objects, rootObject)
-	v.currentFields = append(v.currentFields, objectFields{
-		fields:     &rootObject.Fields,
-		popOnField: -1,
+	v.currentFields = append(v.currentFields, objectField{
+		fields:      &rootObject.Fields,
+		popFieldRef: -1,
 	})
 
 	isSubscription, _, err := AnalyzePlanKind(v.Operation, v.Definition, v.OperationName)
@@ -946,6 +954,7 @@ func (v *Visitor) EnterDocument(operation, definition *ast.Document) {
 	v.exportedVariables = map[string]struct{}{}
 	v.skipFields = map[int]resolve.SkipDirective{}
 	v.includeFields = map[int]resolve.IncludeDirective{}
+	v.currentFieldIndexes = map[int]int{}
 }
 
 func (v *Visitor) LeaveDocument(_, _ *ast.Document) {
@@ -1230,6 +1239,7 @@ func (v *Visitor) configureFetch(internal objectFetchConfiguration, external Fet
 	singleFetch := &resolve.SingleFetch{
 		BufferId:                              internal.bufferID,
 		Input:                                 external.Input,
+		ResetInputFunc:                        external.ResetInputFunc,
 		DataSource:                            external.DataSource,
 		Variables:                             external.Variables,
 		DisallowSingleFlight:                  external.DisallowSingleFlight,
@@ -1373,6 +1383,7 @@ type SubscriptionConfiguration struct {
 
 type FetchConfiguration struct {
 	Input                string
+	ResetInputFunc       func(*resolve.Context, map[string]bool) string
 	Variables            resolve.Variables
 	DataSource           resolve.DataSource
 	DisallowSingleFlight bool

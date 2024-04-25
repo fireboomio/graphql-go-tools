@@ -86,6 +86,22 @@ func (d *Document) ValueContentString(value Value) string {
 	return unsafebytes.BytesToString(d.ValueContentBytes(value))
 }
 
+func (d *Document) SearchVariableRefs(value Value) (refs []int) {
+	switch value.Kind {
+	case ValueKindList:
+		for _, ref := range d.ListValues[value.Ref].Refs {
+			refs = append(refs, d.SearchVariableRefs(d.Value(ref))...)
+		}
+	case ValueKindObject:
+		for _, ref := range d.ObjectValues[value.Ref].Refs {
+			refs = append(refs, d.SearchVariableRefs(d.ObjectFields[ref].Value)...)
+		}
+	case ValueKindVariable:
+		return []int{value.Ref}
+	}
+	return
+}
+
 func (d *Document) ValueContainsVariable(value Value) bool {
 	switch value.Kind {
 	case ValueKindEnum:

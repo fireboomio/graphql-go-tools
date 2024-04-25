@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"github.com/buger/jsonparser"
-
 	"github.com/wundergraph/graphql-go-tools/pkg/engine/datasource/httpclient"
 	"github.com/wundergraph/graphql-go-tools/pkg/fastbuffer"
 	"github.com/wundergraph/graphql-go-tools/pkg/lexer/literal"
@@ -35,12 +33,10 @@ type InputTemplate struct {
 	// This is the case, e.g. when using batching and one sibling is null, resulting in a null value for one batch item
 	// Returning null in this case tells the batch implementation to skip this item
 	SetTemplateOutputToNullOnVariableNull bool
+	ResetInputTemplateFunc                func(*Context, map[string]bool) InputTemplate
 }
 
-const (
-	unrenderVariableKeyFormat = "unrender_variables(%s)"
-	skipFieldJsonPathsFormat  = "skip_field_json_paths(%s)"
-)
+const unrenderVariableKeyFormat = "unrender_variables(%s)"
 
 type UnrenderVariable struct {
 	Name       string
@@ -56,30 +52,33 @@ func GetUnrenderVariables(ctx context.Context, preparedInputBytes []byte) ([]Unr
 	return unrenderVariables, ok
 }
 
-func GetSkipFieldJsonPaths(ctx context.Context, preparedInputBytes []byte) (map[string]bool, bool) {
-	skipFieldPaths, ok := ctx.Value(fmt.Sprintf(skipFieldJsonPathsFormat, string(preparedInputBytes))).(map[string]bool)
-	return skipFieldPaths, ok
+var setTemplateOutputNull = errors.New("set to null")
+
+func (i *InputTemplate) AddTemplateSegment(segment TemplateSegment) {
+	i.Segments = append(i.Segments, segment)
 }
 
-var setTemplateOutputNull = errors.New("set to null")
+func (i *InputTemplate) AddStaticTemplateSegment(data string) {
+	i.AddTemplateSegment(TemplateSegment{SegmentType: StaticSegmentType, Data: []byte(data)})
+}
 
 func (i *InputTemplate) Render(ctx *Context, data []byte, preparedInput *fastbuffer.FastBuffer) (err error) {
 	undefinedVariables, unrenderVariables := make([]string, 0), make([]UnrenderVariable, 0)
 
-	for j := range i.Segments {
-		switch i.Segments[j].SegmentType {
+	for _, segment := range i.Segments {
+		switch segment.SegmentType {
 		case StaticSegmentType:
-			preparedInput.WriteBytes(i.Segments[j].Data)
+			preparedInput.WriteBytes(segment.Data)
 		case VariableSegmentType:
-			switch i.Segments[j].VariableKind {
+			switch segment.VariableKind {
 			case ObjectVariableKind:
-				err = i.renderObjectVariable(ctx, data, i.Segments[j], preparedInput)
+				err = i.renderObjectVariable(ctx, data, segment, preparedInput)
 			case ContextVariableKind:
-				err = i.renderContextVariable(ctx, i.Segments[j], preparedInput, &undefinedVariables, &unrenderVariables)
+				err = i.renderContextVariable(ctx, segment, preparedInput, &undefinedVariables, &unrenderVariables)
 			case HeaderVariableKind:
-				err = i.renderHeaderVariable(ctx, i.Segments[j].VariableSourcePath, preparedInput)
+				err = i.renderHeaderVariable(ctx, segment.VariableSourcePath, preparedInput)
 			default:
-				err = fmt.Errorf("InputTemplate.Render: cannot resolve variable of kind: %d", i.Segments[j].VariableKind)
+				err = fmt.Errorf("InputTemplate.Render: cannot resolve variable of kind: %d", segment.VariableKind)
 			}
 			if err != nil {
 				if errors.Is(err, setTemplateOutputNull) {
