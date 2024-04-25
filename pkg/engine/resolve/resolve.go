@@ -1266,7 +1266,9 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				if err = delayFunc(ctx, data); err != nil {
 					return
 				}
-				r.MergeBufPairErrors(set.buffers[field.BufferID], objectBuf)
+				if fieldBuffer, ok := set.buffers[field.BufferID]; ok {
+					r.MergeBufPairErrors(fieldBuffer, objectBuf)
+				}
 			}
 			if _, skip := skipBufferIds[field.BufferID]; skip {
 				skipCount++
