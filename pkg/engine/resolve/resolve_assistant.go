@@ -76,7 +76,7 @@ func (f *Field) skipRequired(ctx *Context) (skipRequired bool) {
 			}
 			skipEffective = append(skipEffective, !ctx.RuleEvaluate(ctx.Variables, expression))
 		}
-		if skipRequired = !slices.Contains(skipEffective, false); skipRequired {
+		if skipRequired = slices.Contains(skipEffective, false); skipRequired {
 			return
 		}
 	}
