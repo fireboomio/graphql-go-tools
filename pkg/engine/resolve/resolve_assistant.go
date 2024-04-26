@@ -8,6 +8,34 @@ import (
 	"strings"
 )
 
+func (r *Resolver) setResultSetSkipData(ctx *Context, object *Object, set *resultSet) {
+	set.skipBufferIds = make(map[int]bool)
+	set.delayFetchBufferFuncs = make(map[int]func(*Context, []byte) error)
+	set.skipBufferFieldZeroValues = make(map[int]map[*Field]*NodeZeroValue)
+	for i := range object.Fields {
+		field := object.Fields[i]
+		if !field.HasBuffer {
+			continue
+		}
+
+		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
+		searchSkipFieldsFunc := func(_ctx *Context, _ []byte) error {
+			if field.skipRequired(_ctx) || r.searchSkipFields(_ctx, skipFieldZeroValues, field.Value) {
+				set.skipBufferIds[field.BufferID] = true
+			}
+			if len(skipFieldZeroValues) > 0 {
+				set.skipBufferFieldZeroValues[field.BufferID] = skipFieldZeroValues
+			}
+			return nil
+		}
+		if field.WaitExportedRequired || field.WaitExportedRequiredFunc != nil && field.WaitExportedRequiredFunc(ctx) {
+			set.delayFetchBufferFuncs[field.BufferID] = searchSkipFieldsFunc
+		} else {
+			_ = searchSkipFieldsFunc(ctx, nil)
+		}
+	}
+}
+
 func (r *Resolver) searchSkipFields(ctx *Context, skipFieldZeroValues map[*Field]*NodeZeroValue, node Node, parent ...string) (skipAll bool) {
 	switch value := node.(type) {
 	case *Array:
@@ -43,6 +71,66 @@ func (r *Resolver) searchSkipFields(ctx *Context, skipFieldZeroValues map[*Field
 			}
 		}
 		skipAll = objectSkipFieldCount == len(value.Fields)
+	}
+	return
+}
+
+func (r *Resolver) skipOrSetDelayFunc(fetch *SingleFetch, set *resultSet, fetchFunc func(*Context, []byte) error) (skip bool) {
+	if _, skip = set.skipBufferIds[fetch.BufferId]; skip {
+		return
+	}
+
+	delayFunc, skip := set.delayFetchBufferFuncs[fetch.BufferId]
+	if skip {
+		set.delayFetchBufferFuncs[fetch.BufferId] = func(ctx *Context, data []byte) error {
+			_ = delayFunc(ctx, data)
+			if _, skip = set.skipBufferIds[fetch.BufferId]; skip {
+				return nil
+			}
+			return fetchFunc(ctx, data)
+		}
+	}
+	return
+}
+
+func (r *Resolver) runDelayFuncOrSkip(ctx *Context, field *Field, data []byte, objectBuf *BufPair, set *resultSet) (fieldData []byte, skip bool, err error) {
+	if delayFunc, ok := set.delayFetchBufferFuncs[field.BufferID]; ok {
+		if err = delayFunc(ctx, data); err != nil {
+			return
+		}
+		if fieldBuffer, ok := set.buffers[field.BufferID]; ok {
+			r.MergeBufPairErrors(fieldBuffer, objectBuf)
+		}
+	}
+	if _, skip = set.skipBufferIds[field.BufferID]; skip {
+		return
+	}
+
+	buffer, ok := set.buffers[field.BufferID]
+	if ok {
+		fieldData = buffer.Data.Bytes()
+		ctx.resetResponsePathElements()
+		ctx.lastFetchID = field.BufferID
+	}
+	return
+}
+
+func (r *Resolver) setZeroValueOrSkip(ctx *Context, field *Field, data []byte) (fieldData []byte, skip bool) {
+	if nodeZero, ok := ctx.skipFieldZeroValues[field]; ok {
+		if skip = nodeZero.ZeroValue == nil; skip {
+			return
+		}
+
+		if len(nodeZero.Path) > 0 {
+			fieldData, _ = jsonparser.Set(data, nodeZero.ZeroValue, nodeZero.Path...)
+		} else {
+			fieldData = nodeZero.ZeroValue
+		}
+		return
+	}
+
+	if skip = field.skipRequired(ctx); !skip {
+		fieldData = data
 	}
 	return
 }

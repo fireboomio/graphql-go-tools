@@ -1217,38 +1217,11 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		data = bytes.ReplaceAll(data, []byte(`\"`), []byte(`"`))
 	}
 
-	skipBufferIds, delayFetchBufferFuncs := make(map[int]bool), make(map[int]func(*Context, []byte) error)
-	skipBufferFieldZeroValues := make(map[int]map[*Field]*NodeZeroValue)
-	for i := range object.Fields {
-		field := object.Fields[i]
-		if !field.HasBuffer {
-			continue
-		}
-
-		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
-		searchSkipFieldsFunc := func(_ctx *Context, _ []byte) error {
-			if field.skipRequired(_ctx) || r.searchSkipFields(_ctx, skipFieldZeroValues, field.Value) {
-				skipBufferIds[field.BufferID] = true
-			}
-			if len(skipFieldZeroValues) > 0 {
-				skipBufferFieldZeroValues[field.BufferID] = skipFieldZeroValues
-			}
-			return nil
-		}
-		if field.WaitExportedRequired || field.WaitExportedRequiredFunc != nil && field.WaitExportedRequiredFunc(ctx) {
-			delayFetchBufferFuncs[field.BufferID] = searchSkipFieldsFunc
-		} else {
-			_ = searchSkipFieldsFunc(ctx, nil)
-		}
-	}
-
 	var set *resultSet
 	if object.Fetch != nil {
 		set = r.getResultSet()
 		defer r.freeResultSet(set)
-		set.skipBufferIds = skipBufferIds
-		set.delayFetchBufferFuncs = delayFetchBufferFuncs
-		set.skipBufferFieldZeroValues = skipBufferFieldZeroValues
+		r.setResultSetSkipData(ctx, object, set)
 		if err = r.resolveFetch(ctx, object.Fetch, data, set); err != nil {
 			return
 		}
@@ -1266,44 +1239,22 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 	typeNameSkip := false
 	first := true
 	skipCount := 0
-	for _, field := range object.Fields {
-		var fieldData []byte
+	for i := range object.Fields {
+		var (
+			fieldData []byte
+			fieldSkip bool
+		)
+		field := object.Fields[i]
 		if set != nil && field.HasBuffer {
-			if delayFunc, ok := delayFetchBufferFuncs[field.BufferID]; ok && delayFunc != nil {
-				if err = delayFunc(ctx, data); err != nil {
-					return
-				}
-				if fieldBuffer, ok := set.buffers[field.BufferID]; ok {
-					r.MergeBufPairErrors(fieldBuffer, objectBuf)
-				}
-			}
-			if _, skip := skipBufferIds[field.BufferID]; skip {
-				skipCount++
-				continue
-			}
-			buffer, ok := set.buffers[field.BufferID]
-			if ok {
-				fieldData = buffer.Data.Bytes()
-				ctx.resetResponsePathElements()
-				ctx.lastFetchID = field.BufferID
+			if fieldData, fieldSkip, err = r.runDelayFuncOrSkip(ctx, field, data, objectBuf, set); err != nil {
+				return
 			}
 		} else {
-			if nodeZero, ok := ctx.skipFieldZeroValues[field]; ok {
-				if nodeZero.ZeroValue == nil {
-					skipCount++
-					continue
-				}
-				if len(nodeZero.Path) > 0 {
-					fieldData, _ = jsonparser.Set(data, nodeZero.ZeroValue, nodeZero.Path...)
-				} else {
-					fieldData = nodeZero.ZeroValue
-				}
-			} else if field.skipRequired(ctx) {
-				skipCount++
-				continue
-			} else {
-				fieldData = data
-			}
+			fieldData, fieldSkip = r.setZeroValueOrSkip(ctx, field, data)
+		}
+		if fieldSkip {
+			skipCount++
+			continue
 		}
 
 		if field.OnTypeName != nil {
@@ -1329,11 +1280,11 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		objectBuf.Data.WriteBytes(colon)
 		ctx.addPathElement(field.Name)
 		ctx.setPosition(field.Position)
-		if field.HasBuffer {
-			ctx.skipFieldZeroValues = skipBufferFieldZeroValues[field.BufferID]
+		if set != nil && field.HasBuffer {
+			ctx.skipFieldZeroValues = set.skipBufferFieldZeroValues[field.BufferID]
 		}
 		err = r.resolveNode(ctx, field.Value, fieldData, fieldBuf)
-		if field.HasBuffer {
+		if set != nil && field.HasBuffer {
 			maps.Clear(ctx.skipFieldZeroValues)
 		}
 		ctx.removeLastPathElement()
@@ -1454,24 +1405,6 @@ func (r *Resolver) resolveFetch(ctx *Context, fetch Fetch, data []byte, set *res
 		err = batchFetchFunc(ctx, data)
 	case *ParallelFetch:
 		err = r.resolveParallelFetch(ctx, f, data, set)
-	}
-	return
-}
-
-func (r *Resolver) skipOrSetDelayFunc(fetch *SingleFetch, set *resultSet, fetchFunc func(*Context, []byte) error) (skip bool) {
-	if _, skip = set.skipBufferIds[fetch.BufferId]; skip {
-		return
-	}
-
-	delayFunc, skip := set.delayFetchBufferFuncs[fetch.BufferId]
-	if skip {
-		set.delayFetchBufferFuncs[fetch.BufferId] = func(ctx *Context, data []byte) error {
-			_ = delayFunc(ctx, data)
-			if _, skip = set.skipBufferIds[fetch.BufferId]; skip {
-				return nil
-			}
-			return fetchFunc(ctx, data)
-		}
 	}
 	return
 }
