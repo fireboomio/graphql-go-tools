@@ -12,7 +12,7 @@ func (v *Visitor) resetWaitExportedRequired(ref int) {
 	}
 
 	currentField := v.currentFields[index].popField
-	if currentField.WaitExportedRequired {
+	if currentField.NoneExportedBefore || currentField.WaitExportedRequired {
 		return
 	}
 

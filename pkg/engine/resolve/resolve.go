@@ -1565,6 +1565,7 @@ type Field struct {
 	OnTypeName               []byte
 	SkipDirective            SkipDirective
 	IncludeDirective         IncludeDirective
+	NoneExportedBefore       bool
 	WaitExportedRequired     bool
 	WaitExportedRequiredFunc func(*Context) bool
 

@@ -172,7 +172,8 @@ func (f *Field) skipRequired(ctx *Context) (skipRequired bool) {
 }
 
 func (f *Field) SetWaitExportedRequired(exportedVariables []string) {
-	if len(exportedVariables) == 0 || (!f.SkipDirective.Defined && !f.IncludeDirective.Defined) {
+	f.NoneExportedBefore = len(exportedVariables) == 0
+	if f.NoneExportedBefore || (!f.SkipDirective.Defined && !f.IncludeDirective.Defined) {
 		return
 	}
 
