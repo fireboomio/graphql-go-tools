@@ -180,6 +180,8 @@ func (c *Context) Clone() Context {
 		pathElements[i] = make([]byte, len(c.pathElements[i]))
 		copy(pathElements[i], c.pathElements[i])
 	}
+	responseElements := make([]string, len(c.responseElements))
+	copy(responseElements, c.responseElements)
 	patches := make([]patch, len(c.patches))
 	for i := range patches {
 		patches[i] = patch{
@@ -193,21 +195,22 @@ func (c *Context) Clone() Context {
 		copy(patches[i].data, c.patches[i].data)
 	}
 	return Context{
-		Context:         c.Context,
-		RuleEvaluate:    c.RuleEvaluate,
-		Variables:       variables,
-		Request:         c.Request,
-		pathElements:    pathElements,
-		patches:         patches,
-		usedBuffers:     make([]*bytes.Buffer, 0, 48),
-		currentPatch:    c.currentPatch,
-		maxPatch:        c.maxPatch,
-		pathPrefix:      pathPrefix,
-		dataLoader:      c.dataLoader,
-		beforeFetchHook: c.beforeFetchHook,
-		afterFetchHook:  c.afterFetchHook,
-		position:        c.position,
-		RenameTypeNames: c.RenameTypeNames,
+		Context:          c.Context,
+		RuleEvaluate:     c.RuleEvaluate,
+		Variables:        variables,
+		Request:          c.Request,
+		pathElements:     pathElements,
+		responseElements: responseElements,
+		lastFetchID:      c.lastFetchID,
+		patches:          patches,
+		usedBuffers:      make([]*bytes.Buffer, 0, 48),
+		currentPatch:     c.currentPatch,
+		maxPatch:         c.maxPatch,
+		pathPrefix:       pathPrefix,
+		dataLoader:       c.dataLoader,
+		beforeFetchHook:  c.beforeFetchHook,
+		afterFetchHook:   c.afterFetchHook,
+		position:         c.position,
 	}
 }
 
@@ -215,8 +218,10 @@ func (c *Context) Free() {
 	c.Context = nil
 	c.RuleEvaluate = nil
 	c.Variables = c.Variables[:0]
-	c.pathPrefix = c.pathPrefix[:0]
+	c.Request.Header = nil
 	c.pathElements = c.pathElements[:0]
+	c.responseElements = c.responseElements[:0]
+	c.lastFetchID = 0
 	c.patches = c.patches[:0]
 	for i := range c.usedBuffers {
 		pool.BytesBuffer.Put(c.usedBuffers[i])
@@ -224,13 +229,13 @@ func (c *Context) Free() {
 	c.usedBuffers = c.usedBuffers[:0]
 	c.currentPatch = -1
 	c.maxPatch = -1
+	c.pathPrefix = c.pathPrefix[:0]
+	c.dataLoader = nil
 	c.beforeFetchHook = nil
 	c.afterFetchHook = nil
-	c.Request.Header = nil
 	c.position = Position{}
-	c.dataLoader = nil
 	c.RenameTypeNames = nil
-	maps.Clear(c.skipFieldZeroValues)
+	c.skipFieldZeroValues = nil
 }
 
 func (c *Context) SetBeforeFetchHook(hook BeforeFetchHook) {
@@ -1427,7 +1432,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 	preparedInputs := r.getBufPairSlice()
 	defer r.freeBufPairSlice(preparedInputs)
 
-	resolvers := make(map[*BufPair]func() error, len(fetch.Fetches))
+	resolvers := make(map[*BufPair]func(*Context) error, len(fetch.Fetches))
 
 	wg := r.getWaitGroup()
 	defer r.freeWaitGroup(wg)
@@ -1444,7 +1449,7 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 
 			buf := r.getBufPair()
 			set.buffers[f.BufferId] = buf
-			resolvers[buf] = func() error { return r.resolveSingleFetch(ctx, f, data, set) }
+			resolvers[buf] = func(_ctx *Context) error { return r.resolveSingleFetch(_ctx, f, data, set) }
 			disallowParallelFetch = disallowParallelFetch || f.DisallowParallelFetch
 		case *BatchFetch:
 			if skip := r.skipOrSetDelayFunc(f.Fetch, set, r.buildBatchFetchFunc(f, set)); skip {
@@ -1454,24 +1459,26 @@ func (r *Resolver) resolveParallelFetch(ctx *Context, fetch *ParallelFetch, data
 
 			buf := r.getBufPair()
 			set.buffers[f.Fetch.BufferId] = buf
-			resolvers[buf] = func() error { return r.resolveBatchFetch(ctx, f, data, set) }
+			resolvers[buf] = func(_ctx *Context) error { return r.resolveBatchFetch(_ctx, f, data, set) }
 			disallowParallelFetch = disallowParallelFetch || f.Fetch.DisallowParallelFetch
 		}
 	}
 
 	for bufPair, resolver := range resolvers {
 		if disallowParallelFetch {
-			if err = resolver(); err != nil {
+			if err = resolver(ctx); err != nil {
 				return err
 			}
 			wg.Done()
 		} else {
-			go func(b *BufPair, r func() error) {
-				if err = r(); err != nil {
+			clonedCtx := ctx.Clone()
+			go func(c *Context, b *BufPair, r func(*Context) error) {
+				if err = r(c); err != nil {
 					b.WriteErr([]byte(err.Error()), nil, nil, nil)
 				}
+				clonedCtx.Free()
 				wg.Done()
-			}(bufPair, resolver)
+			}(&clonedCtx, bufPair, resolver)
 		}
 	}
 
