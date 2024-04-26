@@ -9,6 +9,8 @@ import (
 	"golang.org/x/exp/maps"
 	"io"
 	"net/http"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -43,8 +45,9 @@ var (
 	literalPath       = []byte("path")
 	literalExtensions = []byte("extensions")
 
-	unableToResolveMsg = []byte("unable to resolve")
-	emptyArray         = []byte("[]")
+	unableToResolveMsg       = []byte("unable to resolve")
+	unableToResolveMsgFormat = "unable to resolve with data (%s) on (%s:%d)"
+	emptyArray               = []byte("[]")
 )
 
 var (
@@ -1181,7 +1184,11 @@ func (r *Resolver) addResolveError(ctx *Context, objectBuf *BufPair) {
 		pathBytes = path.Bytes()
 	}
 
-	objectBuf.WriteErr(unableToResolveMsg, locations.Bytes(), pathBytes, nil)
+	messageBytes := unableToResolveMsg
+	if _, file, line, ok := runtime.Caller(1); ok {
+		messageBytes = []byte(fmt.Sprintf(unableToResolveMsgFormat, objectBuf.Data.String(), filepath.Base(file), line))
+	}
+	objectBuf.WriteErr(messageBytes, locations.Bytes(), pathBytes, nil)
 }
 
 func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, objectBuf *BufPair) (err error) {
