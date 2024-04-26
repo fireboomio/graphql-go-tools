@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,7 +47,7 @@ var (
 	literalExtensions = []byte("extensions")
 
 	unableToResolveMsg       = []byte("unable to resolve")
-	unableToResolveMsgFormat = "unable to resolve with data (%s) on (%s:%d)"
+	unableToResolveMsgFormat = "unable to resolve with data (%s) on path (%s)[%s:%d]"
 	emptyArray               = []byte("[]")
 )
 
@@ -1151,44 +1152,44 @@ func (r *Resolver) resolveNull(b *fastbuffer.FastBuffer) {
 	b.WriteBytes(null)
 }
 
-func (r *Resolver) addResolveError(ctx *Context, objectBuf *BufPair) {
-	locations, path := pool.BytesBuffer.Get(), pool.BytesBuffer.Get()
-	defer pool.BytesBuffer.Put(locations)
-	defer pool.BytesBuffer.Put(path)
+func (r *Resolver) addResolveError(ctx *Context, objectBuf *BufPair, data []byte, path ...string) {
+	locationsBuf, pathBuf := pool.BytesBuffer.Get(), pool.BytesBuffer.Get()
+	defer pool.BytesBuffer.Put(locationsBuf)
+	defer pool.BytesBuffer.Put(pathBuf)
 
 	var pathBytes []byte
 
-	locations.Write(lBrack)
-	locations.Write(lBrace)
-	locations.Write(quote)
-	locations.Write(literalLine)
-	locations.Write(quote)
-	locations.Write(colon)
-	locations.Write([]byte(strconv.Itoa(int(ctx.position.Line))))
-	locations.Write(comma)
-	locations.Write(quote)
-	locations.Write(literalColumn)
-	locations.Write(quote)
-	locations.Write(colon)
-	locations.Write([]byte(strconv.Itoa(int(ctx.position.Column))))
-	locations.Write(rBrace)
-	locations.Write(rBrack)
+	locationsBuf.Write(lBrack)
+	locationsBuf.Write(lBrace)
+	locationsBuf.Write(quote)
+	locationsBuf.Write(literalLine)
+	locationsBuf.Write(quote)
+	locationsBuf.Write(colon)
+	locationsBuf.Write([]byte(strconv.Itoa(int(ctx.position.Line))))
+	locationsBuf.Write(comma)
+	locationsBuf.Write(quote)
+	locationsBuf.Write(literalColumn)
+	locationsBuf.Write(quote)
+	locationsBuf.Write(colon)
+	locationsBuf.Write([]byte(strconv.Itoa(int(ctx.position.Column))))
+	locationsBuf.Write(rBrace)
+	locationsBuf.Write(rBrack)
 
 	if len(ctx.pathElements) > 0 {
-		path.Write(lBrack)
-		path.Write(quote)
-		path.Write(bytes.Join(ctx.pathElements, quotedComma))
-		path.Write(quote)
-		path.Write(rBrack)
+		pathBuf.Write(lBrack)
+		pathBuf.Write(quote)
+		pathBuf.Write(bytes.Join(ctx.pathElements, quotedComma))
+		pathBuf.Write(quote)
+		pathBuf.Write(rBrack)
 
-		pathBytes = path.Bytes()
+		pathBytes = pathBuf.Bytes()
 	}
 
 	messageBytes := unableToResolveMsg
 	if _, file, line, ok := runtime.Caller(1); ok {
-		messageBytes = []byte(fmt.Sprintf(unableToResolveMsgFormat, objectBuf.Data.String(), filepath.Base(file), line))
+		messageBytes = []byte(fmt.Sprintf(unableToResolveMsgFormat, string(data), strings.Join(path, ","), filepath.Base(file), line))
 	}
-	objectBuf.WriteErr(messageBytes, locations.Bytes(), pathBytes, nil)
+	objectBuf.WriteErr(messageBytes, locationsBuf.Bytes(), pathBytes, nil)
 }
 
 func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, objectBuf *BufPair) (err error) {
@@ -1204,7 +1205,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				return
 			}
 
-			r.addResolveError(ctx, objectBuf)
+			r.addResolveError(ctx, objectBuf, data, object.Path...)
 			return errNonNullableFieldValueIsNull
 		}
 
@@ -1355,7 +1356,11 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 
 				// if fied is of object type than we should not add resolve error here
 				if _, ok := field.Value.(*Object); !ok {
-					r.addResolveError(ctx, objectBuf)
+					var fieldValuePath []string
+					if nodeSkip, ok := field.Value.(NodeSkip); ok {
+						fieldValuePath = nodeSkip.NodePath()
+					}
+					r.addResolveError(ctx, objectBuf, fieldData, fieldValuePath...)
 				}
 			}
 
@@ -1375,7 +1380,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 			return errTypeNameSkipped
 		}
 		if !object.Nullable {
-			r.addResolveError(ctx, objectBuf)
+			r.addResolveError(ctx, objectBuf, data, object.Path...)
 			return errNonNullableFieldValueIsNull
 		}
 		r.resolveNull(objectBuf.Data)
