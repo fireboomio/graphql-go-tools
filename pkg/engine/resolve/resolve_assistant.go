@@ -8,6 +8,19 @@ import (
 	"strings"
 )
 
+type DateTimeFormat struct {
+	Format       string
+	CustomFormat string
+}
+
+func (r *Resolver) formatDateTime(ctx *Context, str *String, value []byte) []byte {
+	if str.DateTimeFormat == nil || ctx.FormatDateTime == nil {
+		return value
+	}
+
+	return []byte(ctx.FormatDateTime(str.DateTimeFormat))
+}
+
 func (r *Resolver) setResultSetSkipData(ctx *Context, object *Object, set *resultSet) {
 	set.skipBufferIds = make(map[int]bool)
 	set.delayFetchBufferFuncs = make(map[int]func(*Context, []byte) error)

@@ -133,6 +133,7 @@ type AfterFetchHook interface {
 type Context struct {
 	context.Context
 	RuleEvaluate        func([]byte, string) bool
+	FormatDateTime      func(*DateTimeFormat) string
 	Variables           []byte
 	Request             Request
 	pathElements        [][]byte
@@ -1125,7 +1126,7 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 	}
 
 	value = r.renameTypeName(ctx, str, value)
-
+	value = r.formatDateTime(ctx, str, value)
 	stringBuf.Data.WriteBytes(quote)
 	stringBuf.Data.WriteBytes(value)
 	stringBuf.Data.WriteBytes(quote)
@@ -1691,9 +1692,10 @@ type FieldExportVariable interface {
 type String struct {
 	Path                 []string
 	Nullable             bool
-	Export               *FieldExport `json:"export,omitempty"`
-	UnescapeResponseJson bool         `json:"unescape_response_json,omitempty"`
-	IsTypeName           bool         `json:"is_type_name,omitempty"`
+	Export               *FieldExport    `json:"export,omitempty"`
+	UnescapeResponseJson bool            `json:"unescape_response_json,omitempty"`
+	IsTypeName           bool            `json:"is_type_name,omitempty"`
+	DateTimeFormat       *DateTimeFormat `json:"-"`
 }
 
 func (_ *String) NodeKind() NodeKind {
