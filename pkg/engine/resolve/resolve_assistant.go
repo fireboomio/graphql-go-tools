@@ -18,7 +18,7 @@ func (r *Resolver) formatDateTime(ctx *Context, str *String, value []byte) []byt
 		return value
 	}
 
-	return []byte(ctx.FormatDateTime(str.DateTimeFormat))
+	return []byte(ctx.FormatDateTime(str.DateTimeFormat, string(value)))
 }
 
 func (r *Resolver) setResultSetSkipData(ctx *Context, object *Object, set *resultSet) {

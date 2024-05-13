@@ -133,7 +133,7 @@ type AfterFetchHook interface {
 type Context struct {
 	context.Context
 	RuleEvaluate        func([]byte, string) bool
-	FormatDateTime      func(*DateTimeFormat) string
+	FormatDateTime      func(*DateTimeFormat, string) string
 	Variables           []byte
 	Request             Request
 	pathElements        [][]byte
