@@ -752,7 +752,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 					Path:                 path,
 					Nullable:             nullable,
 					Export:               fieldExport,
-					DateTimeFormat:       v.resolveFormatDateTime(fieldRef),
+					DateFormatArguments:  v.resolveDateFormatArguments(fieldRef),
 					UnescapeResponseJson: unescapeResponseJson,
 				}
 			}

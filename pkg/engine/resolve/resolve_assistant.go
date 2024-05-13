@@ -8,17 +8,12 @@ import (
 	"strings"
 )
 
-type DateTimeFormat struct {
-	Format       string
-	CustomFormat string
-}
-
 func (r *Resolver) formatDateTime(ctx *Context, str *String, value []byte) []byte {
-	if str.DateTimeFormat == nil || ctx.FormatDateTime == nil {
+	if str.DateFormatArguments == nil || ctx.DateFormatFunc == nil {
 		return value
 	}
 
-	return []byte(ctx.FormatDateTime(str.DateTimeFormat, string(value)))
+	return []byte(ctx.DateFormatFunc(str.DateFormatArguments, string(value)))
 }
 
 func (r *Resolver) setResultSetSkipData(ctx *Context, object *Object, set *resultSet) {

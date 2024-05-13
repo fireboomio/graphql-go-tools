@@ -133,7 +133,7 @@ type AfterFetchHook interface {
 type Context struct {
 	context.Context
 	RuleEvaluate        func([]byte, string) bool
-	FormatDateTime      func(*DateTimeFormat, string) string
+	DateFormatFunc      func(map[string]string, string) string
 	Variables           []byte
 	Request             Request
 	pathElements        [][]byte
@@ -1692,10 +1692,10 @@ type FieldExportVariable interface {
 type String struct {
 	Path                 []string
 	Nullable             bool
-	Export               *FieldExport    `json:"export,omitempty"`
-	UnescapeResponseJson bool            `json:"unescape_response_json,omitempty"`
-	IsTypeName           bool            `json:"is_type_name,omitempty"`
-	DateTimeFormat       *DateTimeFormat `json:"-"`
+	Export               *FieldExport      `json:"export,omitempty"`
+	UnescapeResponseJson bool              `json:"unescape_response_json,omitempty"`
+	IsTypeName           bool              `json:"is_type_name,omitempty"`
+	DateFormatArguments  map[string]string `json:"-"`
 }
 
 func (_ *String) NodeKind() NodeKind {

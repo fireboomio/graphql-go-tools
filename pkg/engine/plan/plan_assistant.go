@@ -39,24 +39,32 @@ func (v *Visitor) resetWaitExportedRequired(ref int) {
 	return
 }
 
-func (v *Visitor) resolveFormatDateTime(fieldRef int) *resolve.DateTimeFormat {
+const (
+	formatDateTimeDirective       = "formatDateTime"
+	formatDateTimeArgFormat       = "format"
+	formatDateTimeArgCustomFormat = "customFormat"
+)
+
+func (v *Visitor) resolveDateFormatArguments(fieldRef int) map[string]string {
 	if !v.Operation.Fields[fieldRef].HasDirectives {
 		return nil
 	}
 
 	for _, ref := range v.Operation.Fields[fieldRef].Directives.Refs {
-		if v.Operation.Input.ByteSliceString(v.Operation.Directives[ref].Name) != "formatDateTime" {
+		if v.Operation.Input.ByteSliceString(v.Operation.Directives[ref].Name) != formatDateTimeDirective {
 			continue
 		}
 
-		formatValue, _ := v.Operation.DirectiveArgumentValueByName(ref, []byte("format"))
-		customFormatValue, _ := v.Operation.DirectiveArgumentValueByName(ref, []byte("customFormat"))
-		if formatValue.Kind == ast.ValueKindEnum || customFormatValue.Kind == ast.ValueKindString {
-			return &resolve.DateTimeFormat{
-				Format:       v.Operation.StringValueContentString(formatValue.Ref),
-				CustomFormat: v.Operation.StringValueContentString(customFormatValue.Ref),
-			}
+		arguments := make(map[string]string, 2)
+		formatValue, ok := v.Operation.DirectiveArgumentValueByName(ref, []byte(formatDateTimeArgFormat))
+		if ok && formatValue.Kind == ast.ValueKindEnum {
+			arguments[formatDateTimeArgFormat] = v.Operation.EnumValueNameString(formatValue.Ref)
 		}
+		customFormatValue, ok := v.Operation.DirectiveArgumentValueByName(ref, []byte(formatDateTimeArgCustomFormat))
+		if ok && formatValue.Kind == ast.ValueKindString {
+			arguments[formatDateTimeArgCustomFormat] = v.Operation.StringValueContentString(customFormatValue.Ref)
+		}
+		return arguments
 	}
 	return nil
 }
