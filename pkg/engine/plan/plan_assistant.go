@@ -61,7 +61,7 @@ func (v *Visitor) resolveDateFormatArguments(fieldRef int) map[string]string {
 			arguments[formatDateTimeArgFormat] = v.Operation.EnumValueNameString(formatValue.Ref)
 		}
 		customFormatValue, ok := v.Operation.DirectiveArgumentValueByName(ref, []byte(formatDateTimeArgCustomFormat))
-		if ok && formatValue.Kind == ast.ValueKindString {
+		if ok && customFormatValue.Kind == ast.ValueKindString {
 			arguments[formatDateTimeArgCustomFormat] = v.Operation.StringValueContentString(customFormatValue.Ref)
 		}
 		return arguments
