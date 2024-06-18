@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/buger/jsonparser"
 	"golang.org/x/exp/maps"
 	"reflect"
 	"regexp"
@@ -1241,6 +1242,7 @@ func (v *Visitor) configureFetch(internal objectFetchConfiguration, external Fet
 		BufferId:                              internal.bufferID,
 		Input:                                 external.Input,
 		ResetInputFunc:                        external.ResetInputFunc,
+		RewriteVariableFunc:                   external.RewriteVariableFunc,
 		DataSource:                            external.DataSource,
 		Variables:                             external.Variables,
 		DisallowSingleFlight:                  external.DisallowSingleFlight,
@@ -1385,6 +1387,7 @@ type SubscriptionConfiguration struct {
 type FetchConfiguration struct {
 	Input                string
 	ResetInputFunc       func(*resolve.Context, map[string]bool) string
+	RewriteVariableFunc  func([]byte, []byte, jsonparser.ValueType) ([]byte, jsonparser.ValueType)
 	Variables            resolve.Variables
 	DataSource           resolve.DataSource
 	DisallowSingleFlight bool
