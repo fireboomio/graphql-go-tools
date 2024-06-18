@@ -34,6 +34,7 @@ type InputTemplate struct {
 	// Returning null in this case tells the batch implementation to skip this item
 	SetTemplateOutputToNullOnVariableNull bool
 	ResetInputTemplateFunc                func(*Context, map[string]bool) InputTemplate
+	RewriteVariableFunc                   func([]byte, []byte, jsonparser.ValueType) ([]byte, jsonparser.ValueType)
 }
 
 const unrenderVariableKeyFormat = "unrender_variables(%s)"
@@ -125,6 +126,9 @@ func (i *InputTemplate) renderObjectVariable(ctx context.Context, variables []by
 func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegment, preparedInput *fastbuffer.FastBuffer,
 	undefinedVariables *[]string, unrenderVariables *[]UnrenderVariable) error {
 	value, valueType, offset, err := jsonparser.Get(ctx.Variables, segment.VariableSourcePath...)
+	if err == nil && i.RewriteVariableFunc != nil {
+		value, valueType = i.RewriteVariableFunc(ctx.Variables, value, valueType)
+	}
 	if err != nil || valueType == jsonparser.Null {
 		*unrenderVariables = append(*unrenderVariables, UnrenderVariable{
 			Name:       segment.VariableSourcePath[0],
@@ -141,7 +145,11 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 		return nil
 	}
 	if valueType == jsonparser.String {
-		value = ctx.Variables[offset-len(value)-2 : offset]
+		if i.RewriteVariableFunc != nil {
+			value = []byte(`"` + string(value) + `"`)
+		} else {
+			value = ctx.Variables[offset-len(value)-2 : offset]
+		}
 		switch segment.Renderer.GetKind() {
 		case VariableRendererKindPlain, VariableRendererKindPlanWithValidation:
 			if plainRenderer, ok := (segment.Renderer).(*PlainVariableRenderer); ok {

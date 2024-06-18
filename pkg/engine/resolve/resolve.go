@@ -1629,11 +1629,12 @@ type resultSet struct {
 }
 
 type SingleFetch struct {
-	BufferId       int
-	Input          string
-	ResetInputFunc func(*Context, map[string]bool) string
-	DataSource     DataSource
-	Variables      Variables
+	BufferId            int
+	Input               string
+	ResetInputFunc      func(*Context, map[string]bool) string
+	RewriteVariableFunc func([]byte, []byte, jsonparser.ValueType) ([]byte, jsonparser.ValueType)
+	DataSource          DataSource
+	Variables           Variables
 	// DisallowSingleFlight is used for write operations like mutations, POST, DELETE etc. to disable singleFlight
 	// By default SingleFlight for fetches is disabled and needs to be enabled on the Resolver first
 	// If the resolver allows SingleFlight it's up to each individual DataSource Planner to decide whether an Operation
