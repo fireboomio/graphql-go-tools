@@ -1387,7 +1387,7 @@ type SubscriptionConfiguration struct {
 type FetchConfiguration struct {
 	Input                string
 	ResetInputFunc       func(*resolve.Context, map[string]bool) string
-	RewriteVariableFunc  func([]byte, []byte, jsonparser.ValueType) ([]byte, jsonparser.ValueType)
+	RewriteVariableFunc  func([]byte, []byte, jsonparser.ValueType) ([]byte, error)
 	Variables            resolve.Variables
 	DataSource           resolve.DataSource
 	DisallowSingleFlight bool
