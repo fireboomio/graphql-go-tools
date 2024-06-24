@@ -1632,7 +1632,7 @@ type SingleFetch struct {
 	BufferId            int
 	Input               string
 	ResetInputFunc      func(*Context, map[string]bool) string
-	RewriteVariableFunc func(*Context, []byte, jsonparser.ValueType) ([]byte, error)
+	RewriteVariableFunc func(*Context, []byte, jsonparser.ValueType) ([]byte, jsonparser.ValueType, error)
 	DataSource          DataSource
 	Variables           Variables
 	// DisallowSingleFlight is used for write operations like mutations, POST, DELETE etc. to disable singleFlight
