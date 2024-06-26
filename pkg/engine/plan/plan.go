@@ -585,7 +585,7 @@ func (v *Visitor) EnterField(ref int) {
 		return
 	}
 	v.fieldConfigs[ref] = fieldConfig
-	v.currentField.SetWaitExportedRequiredForArgument(fieldConfig.Arguments, maps.Keys(v.exportedVariables))
+	v.SetWaitExportedRequiredForArgument(fieldConfig.Arguments)
 }
 
 func (v *Visitor) resolveFieldPosition(ref int) resolve.Position {

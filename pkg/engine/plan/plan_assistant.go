@@ -6,6 +6,18 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+func (v *Visitor) SetWaitExportedRequiredForArgument(arguments []ArgumentConfiguration) {
+	if v.currentField.NoneExportedBefore || v.currentField.WaitExportedRequired {
+		return
+	}
+	for _, item := range arguments {
+		if _, ok := v.exportedVariables[item.Name]; ok && item.SourceType == FieldArgumentSource {
+			v.currentField.WaitExportedRequired = true
+			return
+		}
+	}
+}
+
 func (v *Visitor) resetWaitExportedRequired(ref int) {
 	index, ok := v.currentFieldIndexes[ref]
 	if !ok || index >= len(v.currentFieldIndexes) {
