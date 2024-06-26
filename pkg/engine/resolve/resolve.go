@@ -1919,14 +1919,10 @@ func (b *BufPair) WriteErr(message, locations, path, extensions []byte) {
 	b.writeErrors(colon)
 	b.writeErrors(quote)
 	for i := range message {
-		switch message[i] {
-		case '"':
+		if message[i] == '"' && (i == 0 || i > 0 && message[i-1] != '\\') {
 			b.writeErrors(literal.BACKSLASH)
-			b.writeErrors(literal.BACKSLASH)
-			b.writeErrors(literal.QUOTE)
-		default:
-			b.writeErrors(message[i : i+1])
 		}
+		b.writeErrors(message[i : i+1])
 	}
 	b.writeErrors(quote)
 
