@@ -530,7 +530,7 @@ func (v *Visitor) EnterField(ref int) {
 			SkipDirective:    skip,
 			IncludeDirective: include,
 		}
-		v.currentField.SetWaitExportedRequired(maps.Keys(v.exportedVariables))
+		v.currentField.SetWaitExportedRequiredForDirective(maps.Keys(v.exportedVariables))
 		*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 		return
 	}
@@ -574,7 +574,7 @@ func (v *Visitor) EnterField(ref int) {
 		SkipDirective:    skip,
 		IncludeDirective: include,
 	}
-	v.currentField.SetWaitExportedRequired(maps.Keys(v.exportedVariables))
+	v.currentField.SetWaitExportedRequiredForDirective(maps.Keys(v.exportedVariables))
 	v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionType, true, path)
 	*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 
@@ -585,6 +585,7 @@ func (v *Visitor) EnterField(ref int) {
 		return
 	}
 	v.fieldConfigs[ref] = fieldConfig
+	v.currentField.SetWaitExportedRequiredForArgument(fieldConfig.Arguments, maps.Keys(v.exportedVariables))
 }
 
 func (v *Visitor) resolveFieldPosition(ref int) resolve.Position {
@@ -1387,7 +1388,7 @@ type SubscriptionConfiguration struct {
 type FetchConfiguration struct {
 	Input                string
 	ResetInputFunc       func(*resolve.Context, map[string]bool) string
-	RewriteVariableFunc  func(*resolve.Context, []byte, jsonparser.ValueType) ([]byte, error)
+	RewriteVariableFunc  func(*resolve.Context, string, []byte, jsonparser.ValueType) ([]byte, error)
 	Variables            resolve.Variables
 	DataSource           resolve.DataSource
 	DisallowSingleFlight bool

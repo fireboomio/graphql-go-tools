@@ -34,7 +34,7 @@ type InputTemplate struct {
 	// Returning null in this case tells the batch implementation to skip this item
 	SetTemplateOutputToNullOnVariableNull bool
 	ResetInputTemplateFunc                func(*Context, map[string]bool) InputTemplate
-	RewriteVariableFunc                   func(*Context, []byte, jsonparser.ValueType) ([]byte, error)
+	RewriteVariableFunc                   func(*Context, string, []byte, jsonparser.ValueType) ([]byte, error)
 }
 
 const unrenderVariableKeyFormat = "unrender_variables(%s)"
@@ -127,7 +127,7 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 	undefinedVariables *[]string, unrenderVariables *[]UnrenderVariable) error {
 	value, valueType, offset, err := jsonparser.Get(ctx.Variables, segment.VariableSourcePath...)
 	if err == nil && i.RewriteVariableFunc != nil {
-		value, err = i.RewriteVariableFunc(ctx, value, valueType)
+		value, err = i.RewriteVariableFunc(ctx, segment.VariableSourcePath[0], value, valueType)
 	}
 	if err != nil || valueType == jsonparser.Null {
 		*unrenderVariables = append(*unrenderVariables, UnrenderVariable{

@@ -3,6 +3,7 @@ package resolve
 import (
 	"fmt"
 	"github.com/buger/jsonparser"
+	"github.com/wundergraph/graphql-go-tools/pkg/engine/plan"
 	"github.com/wundergraph/graphql-go-tools/pkg/fastbuffer"
 	"golang.org/x/exp/slices"
 	"strings"
@@ -179,7 +180,7 @@ func (f *Field) skipRequired(ctx *Context) (skipRequired bool) {
 	return
 }
 
-func (f *Field) SetWaitExportedRequired(exportedVariables []string) {
+func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables []string) {
 	f.NoneExportedBefore = len(exportedVariables) == 0
 	if f.NoneExportedBefore || (!f.SkipDirective.Defined && !f.IncludeDirective.Defined) {
 		return
@@ -232,6 +233,18 @@ func (f *Field) SetWaitExportedRequired(exportedVariables []string) {
 		})
 	}
 	return
+}
+
+func (f *Field) SetWaitExportedRequiredForArgument(arguments plan.ArgumentsConfigurations, exportedVariables []string) {
+	if f.NoneExportedBefore || f.WaitExportedRequired {
+		return
+	}
+	for _, item := range arguments {
+		if item.SourceType == plan.FieldArgumentSource && slices.Contains(exportedVariables, item.Name) {
+			f.WaitExportedRequired = true
+			return
+		}
+	}
 }
 
 func (s *resultSet) renderInputTemplate(ctx *Context, fetch *SingleFetch, data []byte, preparedInput *fastbuffer.FastBuffer) error {
