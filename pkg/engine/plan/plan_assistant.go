@@ -6,22 +6,27 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func (v *Visitor) resetWaitExportedRequiredForVariable(config objectFetchConfiguration) {
-	if config.resolveField == nil || config.resolveField.LengthOfExportedBefore == 0 || config.resolveField.WaitExportedRequired {
-		return
-	}
-
-	exportedBeforeVariables := make(map[string]int)
-	for variable, index := range v.exportedVariables {
-		if index < config.resolveField.LengthOfExportedBefore {
-			exportedBeforeVariables[variable] = index
+func (v *Visitor) resetWaitExportedRequiredForVariable(fields []*resolve.Field) {
+	for _, field := range fields {
+		if field.LengthOfExportedBefore == 0 || field.WaitExportedRequired {
+			continue
 		}
-	}
+		fetchConfig, ok := v.fetchConfigurations[field.Ref]
+		if !ok || fetchConfig.object == nil || fetchConfig.object.Fetch == nil {
+			continue
+		}
 
-	for _, item := range config.object.Fetch.FetchVariables() {
-		if _, found := exportedBeforeVariables[item]; found {
-			config.resolveField.WaitExportedRequired = true
-			return
+		exportedBeforeVariables := make(map[string]int, field.LengthOfExportedBefore)
+		for variable, index := range v.exportedVariables {
+			if index < field.LengthOfExportedBefore {
+				exportedBeforeVariables[variable] = index
+			}
+		}
+		for _, item := range fetchConfig.object.Fetch.FetchVariables() {
+			if _, found := exportedBeforeVariables[item]; found {
+				field.WaitExportedRequired = true
+				return
+			}
 		}
 	}
 }

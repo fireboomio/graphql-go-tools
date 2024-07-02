@@ -1564,6 +1564,7 @@ func (_ *EmptyArray) NodeKind() NodeKind {
 }
 
 type Field struct {
+	Ref                      int
 	Name                     []byte
 	Value                    Node
 	Position                 Position
