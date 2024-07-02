@@ -906,7 +906,7 @@ func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte, 
 	if export.AsString {
 		value = append(literal.QUOTE, append(value, literal.QUOTE...)...)
 	}
-	if export.AsArray {
+	if export.AsArray && !(bytes.HasPrefix(value, literal.LBRACK) && bytes.HasSuffix(value, literal.RBRACK)) {
 		dataValue, dataType, _, _ := jsonparser.Get(ctx.Variables, export.Path...)
 		switch dataType {
 		case jsonparser.Array:
@@ -1552,7 +1552,10 @@ func (e *Object) ExportedVariables() (variables []string) {
 }
 
 func (e *Object) FetchedVariables() []string {
-	return e.Fetch.FetchVariables()
+	if e.Fetch != nil {
+		return e.Fetch.FetchVariables()
+	}
+	return nil
 }
 
 type EmptyObject struct{}
