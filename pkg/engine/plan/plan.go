@@ -576,6 +576,7 @@ func (v *Visitor) EnterField(ref int) {
 	}
 	v.currentField.SetWaitExportedRequiredForDirective(maps.Keys(v.exportedVariables))
 	v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionType, true, path)
+	v.SetWaitExportedRequiredForVariable()
 	*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 
 	typeName := v.Walker.EnclosingTypeDefinition.NameString(v.Definition)
@@ -585,7 +586,6 @@ func (v *Visitor) EnterField(ref int) {
 		return
 	}
 	v.fieldConfigs[ref] = fieldConfig
-	v.SetWaitExportedRequiredForArgument(fieldConfig.Arguments)
 }
 
 func (v *Visitor) resolveFieldPosition(ref int) resolve.Position {

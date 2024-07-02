@@ -324,6 +324,7 @@ type patch struct {
 
 type Fetch interface {
 	FetchKind() FetchKind
+	FetchVariables() []string
 }
 
 type Fetches []Fetch
@@ -1550,6 +1551,10 @@ func (e *Object) ExportedVariables() (variables []string) {
 	return
 }
 
+func (e *Object) FetchedVariables() []string {
+	return e.Fetch.FetchVariables()
+}
+
 type EmptyObject struct{}
 
 func (_ *EmptyObject) NodeKind() NodeKind {
@@ -1660,12 +1665,28 @@ func (_ *SingleFetch) FetchKind() FetchKind {
 	return FetchKindSingle
 }
 
+func (f *SingleFetch) FetchVariables() (variables []string) {
+	for _, item := range f.InputTemplate.Segments {
+		if item.VariableKind == ContextVariableKind {
+			variables = append(variables, item.VariableSourcePath[0])
+		}
+	}
+	return
+}
+
 type ParallelFetch struct {
 	Fetches []Fetch
 }
 
 func (_ *ParallelFetch) FetchKind() FetchKind {
 	return FetchKindParallel
+}
+
+func (f *ParallelFetch) FetchVariables() (variables []string) {
+	for _, item := range f.Fetches {
+		variables = append(variables, item.FetchVariables()...)
+	}
+	return
 }
 
 type BatchFetch struct {
@@ -1675,6 +1696,10 @@ type BatchFetch struct {
 
 func (_ *BatchFetch) FetchKind() FetchKind {
 	return FetchKindBatch
+}
+
+func (f *BatchFetch) FetchVariables() []string {
+	return f.Fetch.FetchVariables()
 }
 
 // FieldExport takes the value of the field during evaluation (rendering of the field)
@@ -1688,6 +1713,10 @@ type FieldExport struct {
 
 type FieldExportVariable interface {
 	ExportedVariables() []string
+}
+
+type FieldFetchVariable interface {
+	FetchedVariables() []string
 }
 
 type String struct {
@@ -1839,6 +1868,13 @@ func (e *Array) ExportedVariables() (variables []string) {
 		variables = append(variables, itemExport.ExportedVariables()...)
 	}
 	return
+}
+
+func (e *Array) FetchedVariables() []string {
+	if fetch, ok := e.Item.(FieldFetchVariable); ok {
+		return fetch.FetchedVariables()
+	}
+	return nil
 }
 
 type GraphQLSubscription struct {

@@ -6,12 +6,18 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func (v *Visitor) SetWaitExportedRequiredForArgument(arguments []ArgumentConfiguration) {
+func (v *Visitor) SetWaitExportedRequiredForVariable() {
 	if v.currentField.NoneExportedBefore || v.currentField.WaitExportedRequired {
 		return
 	}
-	for _, item := range arguments {
-		if _, ok := v.exportedVariables[item.Name]; ok && item.SourceType == FieldArgumentSource {
+
+	fetch, ok := v.currentField.Value.(resolve.FieldFetchVariable)
+	if !ok {
+		return
+	}
+
+	for _, item := range fetch.FetchedVariables() {
+		if _, found := v.exportedVariables[item]; found {
 			v.currentField.WaitExportedRequired = true
 			return
 		}
