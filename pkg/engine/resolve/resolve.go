@@ -1551,13 +1551,6 @@ func (e *Object) ExportedVariables() (variables []string) {
 	return
 }
 
-func (e *Object) FetchedVariables() []string {
-	if e.Fetch != nil {
-		return e.Fetch.FetchVariables()
-	}
-	return nil
-}
-
 type EmptyObject struct{}
 
 func (_ *EmptyObject) NodeKind() NodeKind {
@@ -1581,7 +1574,7 @@ type Field struct {
 	OnTypeName               []byte
 	SkipDirective            SkipDirective
 	IncludeDirective         IncludeDirective
-	NoneExportedBefore       bool
+	LengthOfExportedBefore   int
 	WaitExportedRequired     bool
 	WaitExportedRequiredFunc func(*Context) bool
 
@@ -1716,10 +1709,6 @@ type FieldExport struct {
 
 type FieldExportVariable interface {
 	ExportedVariables() []string
-}
-
-type FieldFetchVariable interface {
-	FetchedVariables() []string
 }
 
 type String struct {
@@ -1871,13 +1860,6 @@ func (e *Array) ExportedVariables() (variables []string) {
 		variables = append(variables, itemExport.ExportedVariables()...)
 	}
 	return
-}
-
-func (e *Array) FetchedVariables() []string {
-	if fetch, ok := e.Item.(FieldFetchVariable); ok {
-		return fetch.FetchedVariables()
-	}
-	return nil
 }
 
 type GraphQLSubscription struct {

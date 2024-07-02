@@ -6,19 +6,21 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func (v *Visitor) SetWaitExportedRequiredForVariable() {
-	if v.currentField.NoneExportedBefore || v.currentField.WaitExportedRequired {
+func (v *Visitor) resetWaitExportedRequiredForVariable(config objectFetchConfiguration) {
+	if config.resolveField == nil || config.resolveField.LengthOfExportedBefore == 0 || config.resolveField.WaitExportedRequired {
 		return
 	}
 
-	fetch, ok := v.currentField.Value.(resolve.FieldFetchVariable)
-	if !ok {
-		return
+	exportedBeforeVariables := make(map[string]int)
+	for variable, index := range v.exportedVariables {
+		if index < config.resolveField.LengthOfExportedBefore {
+			exportedBeforeVariables[variable] = index
+		}
 	}
 
-	for _, item := range fetch.FetchedVariables() {
-		if _, found := v.exportedVariables[item]; found {
-			v.currentField.WaitExportedRequired = true
+	for _, item := range config.object.Fetch.FetchVariables() {
+		if _, found := exportedBeforeVariables[item]; found {
+			config.resolveField.WaitExportedRequired = true
 			return
 		}
 	}
@@ -31,7 +33,7 @@ func (v *Visitor) resetWaitExportedRequired(ref int) {
 	}
 
 	currentField := v.currentFields[index].popField
-	if currentField.NoneExportedBefore || currentField.WaitExportedRequired {
+	if currentField.LengthOfExportedBefore == 0 || currentField.WaitExportedRequired {
 		return
 	}
 

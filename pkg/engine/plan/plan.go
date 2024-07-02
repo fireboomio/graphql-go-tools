@@ -382,7 +382,7 @@ type Visitor struct {
 	fieldBuffers                 map[int]int
 	skipFieldPaths               []string
 	fieldConfigs                 map[int]*FieldConfiguration
-	exportedVariables            map[string]struct{}
+	exportedVariables            map[string]int
 	skipFields                   map[int]resolve.SkipDirective
 	includeFields                map[int]resolve.IncludeDirective
 	disableResolveFieldPositions bool
@@ -402,6 +402,7 @@ type objectFetchConfiguration struct {
 	isSubscription     bool
 	fieldRef           int
 	fieldDefinitionRef int
+	resolveField       *resolve.Field
 }
 
 func (v *Visitor) AllowVisitor(kind astvisitor.VisitorKind, ref int, visitor interface{}) bool {
@@ -574,9 +575,11 @@ func (v *Visitor) EnterField(ref int) {
 		SkipDirective:    skip,
 		IncludeDirective: include,
 	}
+	if hasFetchConfig && !v.fetchConfigurations[i].isSubscription {
+		v.fetchConfigurations[i].resolveField = v.currentField
+	}
 	v.currentField.SetWaitExportedRequiredForDirective(maps.Keys(v.exportedVariables))
 	v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionType, true, path)
-	v.SetWaitExportedRequiredForVariable()
 	*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 
 	typeName := v.Walker.EnclosingTypeDefinition.NameString(v.Definition)
@@ -671,6 +674,7 @@ func (v *Visitor) LeaveField(ref int) {
 	v.resetWaitExportedRequired(ref)
 	if v.currentFields[len(v.currentFields)-1].popFieldRef == ref {
 		v.currentFields = v.currentFields[:len(v.currentFields)-1]
+		delete(v.currentFieldIndexes, ref)
 	}
 	fieldDefinition, ok := v.Walker.FieldDefinition(ref)
 	if !ok {
@@ -815,7 +819,7 @@ func (v *Visitor) resolveFieldExport(fieldRef int) *resolve.FieldExport {
 	if !ok {
 		return nil
 	}
-	v.exportedVariables[exportAs] = struct{}{}
+	v.exportedVariables[exportAs] = len(v.exportedVariables)
 
 	variableType := v.Operation.VariableDefinitions[variableDefinition].Type
 	fieldExport := &resolve.FieldExport{Path: []string{exportAs}, AsArray: v.Operation.IsListType(variableType)}
@@ -954,7 +958,7 @@ func (v *Visitor) resolveFieldPath(ref int) []string {
 func (v *Visitor) EnterDocument(operation, definition *ast.Document) {
 	v.Operation, v.Definition = operation, definition
 	v.fieldConfigs = map[int]*FieldConfiguration{}
-	v.exportedVariables = map[string]struct{}{}
+	v.exportedVariables = map[string]int{}
 	v.skipFields = map[int]resolve.SkipDirective{}
 	v.includeFields = map[int]resolve.IncludeDirective{}
 	v.currentFieldIndexes = map[int]int{}
@@ -1214,6 +1218,7 @@ func (v *Visitor) configureObjectFetch(config objectFetchConfiguration) {
 	}
 	if config.object.Fetch == nil {
 		config.object.Fetch = fetch
+		v.resetWaitExportedRequiredForVariable(config)
 		return
 	}
 
