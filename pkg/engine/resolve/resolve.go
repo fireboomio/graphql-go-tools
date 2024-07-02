@@ -1663,6 +1663,14 @@ func (_ *SingleFetch) FetchKind() FetchKind {
 }
 
 func (f *SingleFetch) FetchVariables() (variables []string) {
+	for _, item := range f.Variables {
+		if item.GetVariableKind() == ContextVariableKind {
+			variables = append(variables, item.TemplateSegment().VariableSourcePath[0])
+		}
+	}
+	if len(variables) > 0 {
+		return
+	}
 	for _, item := range f.InputTemplate.Segments {
 		if item.VariableKind == ContextVariableKind {
 			variables = append(variables, item.VariableSourcePath[0])
