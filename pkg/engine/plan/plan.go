@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/buger/jsonparser"
-	"golang.org/x/exp/maps"
 	"reflect"
 	"regexp"
 	"strings"
@@ -378,7 +377,7 @@ type Visitor struct {
 	currentFields                []objectField
 	currentField                 *resolve.Field
 	planners                     []plannerConfiguration
-	fetchConfigurations          map[int]*objectFetchConfiguration
+	fetchConfigurations          []objectFetchConfiguration
 	fieldBuffers                 map[int]int
 	skipFieldPaths               []string
 	fieldConfigs                 map[int]*FieldConfiguration
@@ -396,6 +395,7 @@ type objectField struct {
 
 type objectFetchConfiguration struct {
 	object             *resolve.Object
+	objectPopField     *resolve.Field
 	trigger            *resolve.GraphQLSubscriptionTrigger
 	planner            DataSourcePlanner
 	bufferID           int
@@ -519,7 +519,6 @@ func (v *Visitor) EnterField(ref int) {
 	fieldAliasOrName := v.Operation.FieldAliasOrNameBytes(ref)
 	if bytes.Equal(fieldName, literal.TYPENAME) {
 		v.currentField = &resolve.Field{
-			Ref:  ref,
 			Name: fieldAliasOrName,
 			Value: &resolve.String{
 				Nullable:   false,
@@ -531,7 +530,7 @@ func (v *Visitor) EnterField(ref int) {
 			SkipDirective:    skip,
 			IncludeDirective: include,
 		}
-		v.currentField.SetWaitExportedRequiredForDirective(maps.Keys(v.exportedVariables))
+		v.currentField.SetWaitExportedRequiredForDirective(v.exportedVariables)
 		*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 		return
 	}
@@ -541,14 +540,19 @@ func (v *Visitor) EnterField(ref int) {
 		return
 	}
 
-	if fetchConfig, hasFetchConfig := v.fetchConfigurations[ref]; hasFetchConfig {
-		if fetchConfig.isSubscription {
+	for i, config := range v.fetchConfigurations {
+		if config.fieldRef != ref {
+			continue
+		}
+		if config.isSubscription {
 			if plan, ok := v.plan.(*SubscriptionResponsePlan); ok {
-				fetchConfig.trigger = &plan.Response.Trigger
+				v.fetchConfigurations[i].trigger = &plan.Response.Trigger
 			}
 		} else {
-			fetchConfig.object = v.objects[len(v.objects)-1]
+			v.fetchConfigurations[i].object = v.objects[len(v.objects)-1]
+			v.fetchConfigurations[i].objectPopField = v.currentFields[len(v.currentFields)-1].popField
 		}
+		break
 	}
 
 	path := v.resolveFieldPath(ref)
@@ -556,7 +560,6 @@ func (v *Visitor) EnterField(ref int) {
 	bufferID, hasBuffer := v.fieldBuffers[ref]
 
 	v.currentField = &resolve.Field{
-		Ref:              ref,
 		Name:             fieldAliasOrName,
 		HasBuffer:        hasBuffer,
 		BufferID:         bufferID,
@@ -565,7 +568,7 @@ func (v *Visitor) EnterField(ref int) {
 		SkipDirective:    skip,
 		IncludeDirective: include,
 	}
-	v.currentField.SetWaitExportedRequiredForDirective(maps.Keys(v.exportedVariables))
+	v.currentField.SetWaitExportedRequiredForDirective(v.exportedVariables)
 	v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionType, true, path)
 	*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
 
@@ -1000,7 +1003,7 @@ func (v *Visitor) pathDeepness(path string) int {
 	return strings.Count(path, ".")
 }
 
-func (v *Visitor) resolveInputTemplates(config *objectFetchConfiguration, input *string, variables *resolve.Variables) {
+func (v *Visitor) resolveInputTemplates(config objectFetchConfiguration, input *string, variables *resolve.Variables) {
 	*input = templateRegex.ReplaceAllStringFunc(*input, func(s string) string {
 		selectors := selectorRegex.FindStringSubmatch(s)
 		if len(selectors) != 2 {
@@ -1178,7 +1181,7 @@ func (v *Visitor) renderJSONValueTemplate(value ast.Value, variables *resolve.Va
 	return
 }
 
-func (v *Visitor) configureSubscription(config *objectFetchConfiguration) {
+func (v *Visitor) configureSubscription(config objectFetchConfiguration) {
 	subscription := config.planner.ConfigureSubscription()
 	config.trigger.Variables = subscription.Variables
 	config.trigger.Source = subscription.DataSource
@@ -1186,7 +1189,7 @@ func (v *Visitor) configureSubscription(config *objectFetchConfiguration) {
 	config.trigger.Input = []byte(subscription.Input)
 }
 
-func (v *Visitor) configureObjectFetch(config *objectFetchConfiguration) {
+func (v *Visitor) configureObjectFetch(config objectFetchConfiguration) {
 	if config.object == nil {
 		return
 	}
@@ -1203,7 +1206,7 @@ func (v *Visitor) configureObjectFetch(config *objectFetchConfiguration) {
 	case *resolve.BatchFetch:
 		v.resolveInputTemplates(config, &f.Fetch.Input, &f.Fetch.Variables)
 	}
-	v.resetWaitExportedRequiredForVariable(config.object.Fields)
+	defer func() { v.setWaitExportedRequiredForArguments(config) }()
 	if config.object.Fetch == nil {
 		config.object.Fetch = fetch
 		return
@@ -1227,7 +1230,7 @@ func (v *Visitor) configureObjectFetch(config *objectFetchConfiguration) {
 	}
 }
 
-func (v *Visitor) configureFetch(internal *objectFetchConfiguration, external FetchConfiguration) resolve.Fetch {
+func (v *Visitor) configureFetch(internal objectFetchConfiguration, external FetchConfiguration) resolve.Fetch {
 	dataSourceType := reflect.TypeOf(external.DataSource).String()
 	dataSourceType = strings.TrimPrefix(dataSourceType, "*")
 
@@ -1408,7 +1411,7 @@ type configurationVisitor struct {
 	walker                *astvisitor.Walker
 	config                Configuration
 	planners              []plannerConfiguration
-	fetches               map[int]*objectFetchConfiguration
+	fetches               []objectFetchConfiguration
 	currentBufferId       int
 	fieldBuffers          map[int]int
 
@@ -1618,13 +1621,13 @@ func (c *configurationVisitor) EnterField(ref int) {
 			if !ok {
 				continue
 			}
-			c.fetches[ref] = &objectFetchConfiguration{
+			c.fetches = append(c.fetches, objectFetchConfiguration{
 				bufferID:           bufferID,
 				planner:            planner,
 				isSubscription:     isSubscription,
 				fieldRef:           ref,
 				fieldDefinitionRef: fieldDefinition,
-			}
+			})
 			return
 		}
 	}
@@ -1660,9 +1663,9 @@ func (c *configurationVisitor) EnterDocument(operation, definition *ast.Document
 		c.planners = c.planners[:0]
 	}
 	if c.fetches == nil {
-		c.fetches = make(map[int]*objectFetchConfiguration)
+		c.fetches = []objectFetchConfiguration{}
 	} else {
-		maps.Clear(c.fetches)
+		c.fetches = c.fetches[:0]
 	}
 	if c.fieldBuffers == nil {
 		c.fieldBuffers = map[int]int{}

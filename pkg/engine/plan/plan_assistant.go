@@ -6,25 +6,38 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func (v *Visitor) resetWaitExportedRequiredForVariable(fields []*resolve.Field) {
-	for _, field := range fields {
-		if field.LengthOfExportedBefore == 0 || field.WaitExportedRequired {
-			continue
+func (v *Visitor) setWaitExportedRequiredForArguments(config objectFetchConfiguration) {
+	objectPopField := config.objectPopField
+	if objectPopField == nil || objectPopField.WaitExportedRequired || objectPopField.LengthOfExportedBefore == 0 {
+		return
+	}
+	for _, item := range config.object.Fields {
+		if item.WaitExportedRequired {
+			objectPopField.WaitExportedRequired = true
+			return
 		}
-		fetchConfig, ok := v.fetchConfigurations[field.Ref]
-		if !ok || fetchConfig.object == nil || fetchConfig.object.Fetch == nil {
-			continue
-		}
+	}
 
-		exportedBeforeVariables := make(map[string]int, field.LengthOfExportedBefore)
-		for variable, index := range v.exportedVariables {
-			if index < field.LengthOfExportedBefore {
-				exportedBeforeVariables[variable] = index
-			}
+	var variables []resolve.Variable
+	switch f := config.object.Fetch.(type) {
+	case *resolve.SingleFetch:
+		variables = f.Variables
+	case *resolve.BatchFetch:
+		variables = f.Fetch.Variables
+	default:
+		return
+	}
+	for _, item := range variables {
+		if item.GetVariableKind() != resolve.ContextVariableKind {
+			continue
 		}
-		for _, item := range fetchConfig.object.Fetch.FetchVariables() {
-			if _, found := exportedBeforeVariables[item]; found {
-				field.WaitExportedRequired = true
+		segment := item.TemplateSegment()
+		if segment.VariableGenerated {
+			continue
+		}
+		for variable, index := range v.exportedVariables {
+			if variable == segment.VariableSourcePath[0] && index < objectPopField.LengthOfExportedBefore {
+				objectPopField.WaitExportedRequired = true
 				return
 			}
 		}

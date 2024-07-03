@@ -179,7 +179,7 @@ func (f *Field) skipRequired(ctx *Context) (skipRequired bool) {
 	return
 }
 
-func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables []string) {
+func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables map[string]int) {
 	f.LengthOfExportedBefore = len(exportedVariables)
 	if f.LengthOfExportedBefore == 0 || (!f.SkipDirective.Defined && !f.IncludeDirective.Defined) {
 		return
@@ -214,22 +214,28 @@ func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables []string) 
 			}
 		}
 	}
-	f.WaitExportedRequired = slices.ContainsFunc(exportedVariables, func(exported string) bool {
-		return slices.Contains(ifNames, exported) || slices.ContainsFunc(expressions, func(expr string) bool {
-			return strings.Contains(expr, fmt.Sprintf("arguments.%s", exported))
-		})
-	})
+	for variable := range exportedVariables {
+		if slices.Contains(ifNames, variable) || slices.ContainsFunc(expressions, func(expr string) bool {
+			return strings.Contains(expr, fmt.Sprintf("arguments.%s", variable))
+		}) {
+			f.WaitExportedRequired = true
+			break
+		}
+	}
 	if f.WaitExportedRequired || len(expressionVariables) == 0 {
 		return
 	}
 
 	f.WaitExportedRequiredFunc = func(ctx *Context) bool {
-		return slices.ContainsFunc(exportedVariables, func(exported string) bool {
-			return slices.ContainsFunc(expressionVariables, func(expr string) bool {
-				expr, _ = jsonparser.GetString(ctx.Variables, expr)
-				return strings.Contains(expr, fmt.Sprintf("arguments.%s", exported))
-			})
-		})
+		for variable := range exportedVariables {
+			if slices.ContainsFunc(expressionVariables, func(exprVariable string) bool {
+				expr, _ := jsonparser.GetString(ctx.Variables, exprVariable)
+				return strings.Contains(expr, fmt.Sprintf("arguments.%s", variable))
+			}) {
+				return true
+			}
+		}
+		return false
 	}
 	return
 }

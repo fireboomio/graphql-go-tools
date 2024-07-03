@@ -324,7 +324,6 @@ type patch struct {
 
 type Fetch interface {
 	FetchKind() FetchKind
-	FetchVariables() []string
 }
 
 type Fetches []Fetch
@@ -1564,7 +1563,6 @@ func (_ *EmptyArray) NodeKind() NodeKind {
 }
 
 type Field struct {
-	Ref                      int
 	Name                     []byte
 	Value                    Node
 	Position                 Position
@@ -1662,39 +1660,12 @@ func (_ *SingleFetch) FetchKind() FetchKind {
 	return FetchKindSingle
 }
 
-func (f *SingleFetch) FetchVariables() (variables []string) {
-	for _, item := range f.InputTemplate.Segments {
-		if item.VariableKind == ContextVariableKind && !item.VariableGenerated {
-			variables = append(variables, item.VariableSourcePath[0])
-		}
-	}
-	if len(variables) > 0 {
-		return
-	}
-	for _, item := range f.Variables {
-		if item.GetVariableKind() != ContextVariableKind {
-			continue
-		}
-		if segment := item.TemplateSegment(); !segment.VariableGenerated {
-			variables = append(variables, segment.VariableSourcePath[0])
-		}
-	}
-	return
-}
-
 type ParallelFetch struct {
 	Fetches []Fetch
 }
 
 func (_ *ParallelFetch) FetchKind() FetchKind {
 	return FetchKindParallel
-}
-
-func (f *ParallelFetch) FetchVariables() (variables []string) {
-	for _, item := range f.Fetches {
-		variables = append(variables, item.FetchVariables()...)
-	}
-	return
 }
 
 type BatchFetch struct {
@@ -1704,10 +1675,6 @@ type BatchFetch struct {
 
 func (_ *BatchFetch) FetchKind() FetchKind {
 	return FetchKindBatch
-}
-
-func (f *BatchFetch) FetchVariables() []string {
-	return f.Fetch.FetchVariables()
 }
 
 // FieldExport takes the value of the field during evaluation (rendering of the field)
