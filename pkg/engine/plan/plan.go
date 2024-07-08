@@ -514,6 +514,7 @@ func (v *Visitor) EnterField(ref int) {
 
 	skip := v.resolveSkipForField(ref)
 	include := v.resolveIncludeForField(ref)
+	skipVariables := v.resolveSkipVariables(ref)
 
 	fieldName := v.Operation.FieldNameBytes(ref)
 	fieldAliasOrName := v.Operation.FieldAliasOrNameBytes(ref)
@@ -525,10 +526,11 @@ func (v *Visitor) EnterField(ref int) {
 				Path:       []string{"__typename"},
 				IsTypeName: true,
 			},
-			OnTypeName:       v.resolveOnTypeName(),
-			Position:         v.resolveFieldPosition(ref),
-			SkipDirective:    skip,
-			IncludeDirective: include,
+			OnTypeName:             v.resolveOnTypeName(),
+			Position:               v.resolveFieldPosition(ref),
+			SkipDirective:          skip,
+			IncludeDirective:       include,
+			SkipVariableDirectives: skipVariables,
 		}
 		v.currentField.SetWaitExportedRequiredForDirective(v.exportedVariables)
 		*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
@@ -560,13 +562,14 @@ func (v *Visitor) EnterField(ref int) {
 	bufferID, hasBuffer := v.fieldBuffers[ref]
 
 	v.currentField = &resolve.Field{
-		Name:             fieldAliasOrName,
-		HasBuffer:        hasBuffer,
-		BufferID:         bufferID,
-		OnTypeName:       v.resolveOnTypeName(),
-		Position:         v.resolveFieldPosition(ref),
-		SkipDirective:    skip,
-		IncludeDirective: include,
+		Name:                   fieldAliasOrName,
+		HasBuffer:              hasBuffer,
+		BufferID:               bufferID,
+		OnTypeName:             v.resolveOnTypeName(),
+		Position:               v.resolveFieldPosition(ref),
+		SkipDirective:          skip,
+		IncludeDirective:       include,
+		SkipVariableDirectives: skipVariables,
 	}
 	v.currentField.SetWaitExportedRequiredForDirective(v.exportedVariables)
 	v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionType, true, path)
@@ -1248,6 +1251,7 @@ func (v *Visitor) configureFetch(internal objectFetchConfiguration, external Fet
 		DisableDataLoader:                     external.DisableDataLoader,
 		SetTemplateOutputToNullOnVariableNull: external.SetTemplateOutputToNullOnVariableNull,
 	}
+	v.setSkipVariableFuncForFetch(internal, singleFetch)
 
 	// if a field depends on an exported variable, data loader needs to be disabled
 	// this is because the data loader will render all input templates before all fields are evaluated

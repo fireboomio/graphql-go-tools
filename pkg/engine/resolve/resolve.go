@@ -215,6 +215,13 @@ func (c *Context) Clone() Context {
 	}
 }
 
+func (c *Context) Value(key any) any {
+	if c == nil || c.Context == nil {
+		return nil
+	}
+	return c.Context.Value(key)
+}
+
 func (c *Context) Free() {
 	c.Context = nil
 	c.RuleEvaluate = nil
@@ -1573,6 +1580,7 @@ type Field struct {
 	OnTypeName               []byte
 	SkipDirective            SkipDirective
 	IncludeDirective         IncludeDirective
+	SkipVariableDirectives   []SkipVariableDirective
 	LengthOfExportedBefore   int
 	WaitExportedRequired     bool
 	WaitExportedRequiredFunc func(*Context) bool
@@ -1594,7 +1602,12 @@ type (
 		Expression           string
 		ExpressionIsVariable bool
 	}
-	IncludeDirective SkipDirective
+	IncludeDirective      SkipDirective
+	SkipVariableDirective struct {
+		VariableNames        []string
+		Expression           string
+		ExpressionIsVariable bool
+	}
 )
 
 type Position struct {
@@ -1633,6 +1646,7 @@ type SingleFetch struct {
 	Input               string
 	ResetInputFunc      func(*Context, map[string]bool) string
 	RewriteVariableFunc func(*Context, string, []byte, jsonparser.ValueType) ([]byte, error)
+	SkipVariableFuncs   map[string][]func(*Context) bool
 	DataSource          DataSource
 	Variables           Variables
 	// DisallowSingleFlight is used for write operations like mutations, POST, DELETE etc. to disable singleFlight

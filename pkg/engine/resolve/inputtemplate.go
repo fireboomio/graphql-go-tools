@@ -8,6 +8,7 @@ import (
 	"github.com/wundergraph/graphql-go-tools/pkg/engine/datasource/httpclient"
 	"github.com/wundergraph/graphql-go-tools/pkg/fastbuffer"
 	"github.com/wundergraph/graphql-go-tools/pkg/lexer/literal"
+	"slices"
 )
 
 type SegmentType int
@@ -24,6 +25,7 @@ type TemplateSegment struct {
 	VariableSourcePath []string
 	VariableGenerated  bool
 	VariableNullable   bool
+	VariableSkipFuncs  []func(*Context) bool
 	Renderer           VariableRenderer
 }
 
@@ -128,6 +130,9 @@ func (i *InputTemplate) renderContextVariable(ctx *Context, segment TemplateSegm
 	value, valueType, offset, err := jsonparser.Get(ctx.Variables, segment.VariableSourcePath...)
 	if err == nil && i.RewriteVariableFunc != nil {
 		value, err = i.RewriteVariableFunc(ctx, segment.VariableSourcePath[0], value, valueType)
+	}
+	if slices.ContainsFunc(segment.VariableSkipFuncs, func(f func(*Context) bool) bool { return f(ctx) }) {
+		valueType, err = jsonparser.NotExist, jsonparser.KeyPathNotFoundError
 	}
 	if err != nil || valueType == jsonparser.Null {
 		*unrenderVariables = append(*unrenderVariables, UnrenderVariable{

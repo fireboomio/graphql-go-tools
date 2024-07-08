@@ -190,6 +190,15 @@ func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables map[string
 		expressions         []string
 		expressionVariables []string
 	)
+	if skipVariableDirectives := f.SkipVariableDirectives; len(skipVariableDirectives) > 0 {
+		for _, skipVariableDirective := range skipVariableDirectives {
+			if skipVariableDirective.ExpressionIsVariable {
+				expressionVariables = append(expressionVariables, skipVariableDirective.Expression)
+			} else {
+				expressions = append(expressions, skipVariableDirective.Expression)
+			}
+		}
+	}
 	if skipDirective := f.SkipDirective; skipDirective.Defined {
 		if ifName := skipDirective.VariableName; len(ifName) > 0 {
 			ifNames = append(ifNames, ifName)

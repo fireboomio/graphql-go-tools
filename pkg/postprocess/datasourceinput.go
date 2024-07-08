@@ -56,14 +56,14 @@ func (d *ProcessDataSource) traverseFetch(fetch resolve.Fetch) {
 }
 
 func (d *ProcessDataSource) traverseTrigger(trigger *resolve.GraphQLSubscriptionTrigger) {
-	d.resolveInputTemplate(trigger.Variables, string(trigger.Input), &trigger.InputTemplate)
+	d.resolveInputTemplate(trigger.Variables, string(trigger.Input), &trigger.InputTemplate, nil)
 	trigger.Input = nil
 	trigger.Variables = nil
 }
 
 func (d *ProcessDataSource) traverseSingleFetch(fetch *resolve.SingleFetch) {
 	d.setResetInputTemplateFunc(fetch)
-	d.resolveInputTemplate(fetch.Variables, fetch.Input, &fetch.InputTemplate)
+	d.resolveInputTemplate(fetch.Variables, fetch.Input, &fetch.InputTemplate, fetch.SkipVariableFuncs)
 	fetch.Input = ""
 	fetch.Variables = nil
 	fetch.InputTemplate.SetTemplateOutputToNullOnVariableNull = fetch.SetTemplateOutputToNullOnVariableNull
@@ -72,7 +72,8 @@ func (d *ProcessDataSource) traverseSingleFetch(fetch *resolve.SingleFetch) {
 	fetch.RewriteVariableFunc = nil
 }
 
-func (d *ProcessDataSource) resolveInputTemplate(variables resolve.Variables, input string, template *resolve.InputTemplate) {
+func (d *ProcessDataSource) resolveInputTemplate(variables resolve.Variables, input string, template *resolve.InputTemplate,
+	skipVariableFuncs map[string][]func(*resolve.Context) bool) {
 	if input == "" {
 		return
 	}
@@ -88,7 +89,11 @@ func (d *ProcessDataSource) resolveInputTemplate(variables resolve.Variables, in
 		switch {
 		case isVariable:
 			i, _ := strconv.Atoi(segment)
-			template.AddTemplateSegment((variables)[i].TemplateSegment())
+			variableSegment := (variables)[i].TemplateSegment()
+			if skipFuncs, ok := skipVariableFuncs[variableSegment.VariableSourcePath[0]]; ok {
+				variableSegment.VariableSkipFuncs = skipFuncs
+			}
+			template.AddTemplateSegment(variableSegment)
 			isVariable = false
 		default:
 			template.AddStaticTemplateSegment(segment)
@@ -107,7 +112,7 @@ func (d *ProcessDataSource) setResetInputTemplateFunc(fetch *resolve.SingleFetch
 	fetch.InputTemplate.ResetInputTemplateFunc = func(ctx *resolve.Context, data map[string]bool) resolve.InputTemplate {
 		inputTemplate := resolve.InputTemplate{}
 		inputTemplate.SetTemplateOutputToNullOnVariableNull = fetch.InputTemplate.SetTemplateOutputToNullOnVariableNull
-		d.resolveInputTemplate(variables, resetInputFunc(ctx, data), &inputTemplate)
+		d.resolveInputTemplate(variables, resetInputFunc(ctx, data), &inputTemplate, fetch.SkipVariableFuncs)
 		if len(inputTemplate.Segments) == 0 {
 			inputTemplate = fetch.InputTemplate
 		}
