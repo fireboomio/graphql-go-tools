@@ -752,7 +752,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 					Nullable:             nullable,
 					Export:               fieldExport,
 					DateFormatArguments:  v.resolveDateFormatArguments(fieldRef),
-					UnescapeResponseJson: unescapeResponseJson,
+					UnescapeResponseJson: unescapeResponseJson || fieldConfig == nil && strings.EqualFold(typeName, "JSON"),
 				}
 			}
 		case ast.NodeKindEnumTypeDefinition:
