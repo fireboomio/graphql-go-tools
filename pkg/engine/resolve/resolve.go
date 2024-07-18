@@ -87,15 +87,8 @@ type Node interface {
 	NodeKind() NodeKind
 }
 
-type NodeSkip interface {
+type NodePath interface {
 	NodePath() []string
-	NodeZeroValue() []byte
-}
-
-type NodeZeroValue struct {
-	Path      []string
-	JsonPath  []string
-	ZeroValue []byte
 }
 
 type NodeKind int
@@ -132,24 +125,24 @@ type AfterFetchHook interface {
 
 type Context struct {
 	context.Context
-	RuleEvaluate        func([]byte, string) bool
-	DateFormatFunc      func(map[string]string, string) string
-	Variables           []byte
-	Request             Request
-	pathElements        [][]byte
-	responseElements    []string
-	lastFetchID         int
-	patches             []patch
-	usedBuffers         []*bytes.Buffer
-	currentPatch        int
-	maxPatch            int
-	pathPrefix          []byte
-	dataLoader          *dataLoader
-	beforeFetchHook     BeforeFetchHook
-	afterFetchHook      AfterFetchHook
-	position            Position
-	RenameTypeNames     []RenameTypeName
-	skipFieldZeroValues map[*Field]*NodeZeroValue
+	RuleEvaluate       func([]byte, string) bool
+	DateFormatFunc     func(map[string]string, string) string
+	Variables          []byte
+	Request            Request
+	pathElements       [][]byte
+	responseElements   []string
+	lastFetchID        int
+	patches            []patch
+	usedBuffers        []*bytes.Buffer
+	currentPatch       int
+	maxPatch           int
+	pathPrefix         []byte
+	dataLoader         *dataLoader
+	beforeFetchHook    BeforeFetchHook
+	afterFetchHook     AfterFetchHook
+	position           Position
+	RenameTypeNames    []RenameTypeName
+	skipFieldJsonPaths map[*Field][]string
 }
 
 type Request struct {
@@ -243,7 +236,7 @@ func (c *Context) Free() {
 	c.afterFetchHook = nil
 	c.position = Position{}
 	c.RenameTypeNames = nil
-	c.skipFieldZeroValues = nil
+	c.skipFieldJsonPaths = nil
 }
 
 func (c *Context) SetBeforeFetchHook(hook BeforeFetchHook) {
@@ -1263,7 +1256,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				return
 			}
 		} else {
-			fieldData, fieldSkip = r.setZeroValueOrSkip(ctx, field, data)
+			fieldSkip, fieldData = r.skipFieldRequired(ctx, field), data
 		}
 		if fieldSkip {
 			skipCount++
@@ -1294,11 +1287,11 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 		ctx.addPathElement(field.Name)
 		ctx.setPosition(field.Position)
 		if set != nil && field.HasBuffer {
-			ctx.skipFieldZeroValues = set.skipBufferFieldZeroValues[field.BufferID]
+			ctx.skipFieldJsonPaths = set.skipBufferFieldJsonPaths[field.BufferID]
 		}
 		err = r.resolveNode(ctx, field.Value, fieldData, fieldBuf)
 		if set != nil && field.HasBuffer {
-			maps.Clear(ctx.skipFieldZeroValues)
+			maps.Clear(ctx.skipFieldJsonPaths)
 		}
 		ctx.removeLastPathElement()
 		ctx.responseElements = responseElements
@@ -1321,7 +1314,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 				// if fied is of object type than we should not add resolve error here
 				if _, ok := field.Value.(*Object); !ok {
 					var fieldValuePath []string
-					if nodeSkip, ok := field.Value.(NodeSkip); ok {
+					if nodeSkip, ok := field.Value.(NodePath); ok {
 						fieldValuePath = nodeSkip.NodePath()
 					}
 					r.addResolveError(ctx, objectBuf, fieldData, fieldValuePath...)
@@ -1391,8 +1384,8 @@ func (r *Resolver) freeResultSet(set *resultSet) {
 	for i := range set.delayFetchBufferFuncs {
 		delete(set.delayFetchBufferFuncs, i)
 	}
-	for i := range set.skipBufferFieldZeroValues {
-		delete(set.skipBufferFieldZeroValues, i)
+	for i := range set.skipBufferFieldJsonPaths {
+		delete(set.skipBufferFieldJsonPaths, i)
 	}
 	r.resultSetPool.Put(set)
 }
@@ -1541,10 +1534,6 @@ func (e *Object) NodePath() []string {
 	return e.Path
 }
 
-func (e *Object) NodeZeroValue() []byte {
-	return literal.ZeroObjectValue
-}
-
 func (e *Object) ExportedVariables() (variables []string) {
 	for _, field := range e.Fields {
 		if export, ok := field.Value.(FieldExportVariable); ok {
@@ -1632,10 +1621,10 @@ func (_ *Null) NodeKind() NodeKind {
 }
 
 type resultSet struct {
-	buffers                   map[int]*BufPair
-	skipBufferIds             map[int]bool
-	delayFetchBufferFuncs     map[int]func(*Context, []byte) error
-	skipBufferFieldZeroValues map[int]map[*Field]*NodeZeroValue
+	buffers                  map[int]*BufPair
+	skipBufferIds            map[int]bool
+	delayFetchBufferFuncs    map[int]func(*Context, []byte) error
+	skipBufferFieldJsonPaths map[int]map[*Field][]string
 }
 
 type SingleFetch struct {
@@ -1718,10 +1707,6 @@ func (e *String) NodePath() []string {
 	return e.Path
 }
 
-func (e *String) NodeZeroValue() []byte {
-	return literal.ZeroStringWithQuoteValue
-}
-
 func (e *String) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1741,10 +1726,6 @@ func (_ *Boolean) NodeKind() NodeKind {
 
 func (e *Boolean) NodePath() []string {
 	return e.Path
-}
-
-func (e *Boolean) NodeZeroValue() []byte {
-	return literal.FALSE
 }
 
 func (e *Boolean) ExportedVariables() (variables []string) {
@@ -1768,10 +1749,6 @@ func (e *Float) NodePath() []string {
 	return e.Path
 }
 
-func (e *Float) NodeZeroValue() []byte {
-	return literal.ZeroNumberValue
-}
-
 func (e *Float) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1791,10 +1768,6 @@ func (_ *Integer) NodeKind() NodeKind {
 
 func (e *Integer) NodePath() []string {
 	return e.Path
-}
-
-func (e *Integer) NodeZeroValue() []byte {
-	return literal.ZeroNumberValue
 }
 
 func (e *Integer) ExportedVariables() (variables []string) {
@@ -1824,10 +1797,6 @@ func (_ *Array) NodeKind() NodeKind {
 
 func (e *Array) NodePath() []string {
 	return e.Path
-}
-
-func (e *Array) NodeZeroValue() []byte {
-	return literal.ZeroArrayValue
 }
 
 func (e *Array) ExportedVariables() (variables []string) {

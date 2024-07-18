@@ -19,20 +19,20 @@ func (r *Resolver) formatDateTime(ctx *Context, str *String, value []byte) []byt
 func (r *Resolver) setResultSetSkipData(ctx *Context, object *Object, set *resultSet) {
 	set.skipBufferIds = make(map[int]bool)
 	set.delayFetchBufferFuncs = make(map[int]func(*Context, []byte) error)
-	set.skipBufferFieldZeroValues = make(map[int]map[*Field]*NodeZeroValue)
+	set.skipBufferFieldJsonPaths = make(map[int]map[*Field][]string)
 	for i := range object.Fields {
 		field := object.Fields[i]
 		if !field.HasBuffer {
 			continue
 		}
 
-		skipFieldZeroValues := make(map[*Field]*NodeZeroValue)
+		skipFieldJsonPaths := make(map[*Field][]string)
 		searchSkipFieldsFunc := func(_ctx *Context, _ []byte) error {
-			if field.skipRequired(_ctx) || r.searchSkipFields(_ctx, skipFieldZeroValues, field.Value) {
+			if field.skipRequired(_ctx) || r.searchSkipFields(_ctx, skipFieldJsonPaths, field.Value) {
 				set.skipBufferIds[field.BufferID] = true
 			}
-			if len(skipFieldZeroValues) > 0 {
-				set.skipBufferFieldZeroValues[field.BufferID] = skipFieldZeroValues
+			if len(skipFieldJsonPaths) > 0 {
+				set.skipBufferFieldJsonPaths[field.BufferID] = skipFieldJsonPaths
 			}
 			return nil
 		}
@@ -44,10 +44,10 @@ func (r *Resolver) setResultSetSkipData(ctx *Context, object *Object, set *resul
 	}
 }
 
-func (r *Resolver) searchSkipFields(ctx *Context, skipFieldZeroValues map[*Field]*NodeZeroValue, node Node, parent ...string) (skipAll bool) {
+func (r *Resolver) searchSkipFields(ctx *Context, skipFieldJsonPaths map[*Field][]string, node Node, parent ...string) (skipAll bool) {
 	switch value := node.(type) {
 	case *Array:
-		skipAll = r.searchSkipFields(ctx, skipFieldZeroValues, value.Item, parent...)
+		skipAll = r.searchSkipFields(ctx, skipFieldJsonPaths, value.Item, parent...)
 	case *Object:
 		var objectSkipFieldCount int
 		objectJsonPath := append(parent, value.NodePath()...)
@@ -56,7 +56,7 @@ func (r *Resolver) searchSkipFields(ctx *Context, skipFieldZeroValues map[*Field
 			if item.HasBuffer {
 				continue
 			}
-			nodeSkip, ok := item.Value.(NodeSkip)
+			nodeSkip, ok := item.Value.(NodePath)
 			if !ok {
 				continue
 			}
@@ -66,20 +66,13 @@ func (r *Resolver) searchSkipFields(ctx *Context, skipFieldZeroValues map[*Field
 			copy(itemSkipJsonPath, objectJsonPath)
 			copy(itemSkipJsonPath[objectJsonPathLen:], itemSkipPath)
 			itemSkip := item.skipRequired(ctx)
-			itemSkipAll := r.searchSkipFields(ctx, skipFieldZeroValues, item.Value, itemSkipJsonPath...)
+			itemSkipAll := r.searchSkipFields(ctx, skipFieldJsonPaths, item.Value, itemSkipJsonPath...)
 			if !itemSkip && !itemSkipAll {
 				continue
 			}
 
 			objectSkipFieldCount++
-			itemZeroValue := &NodeZeroValue{
-				Path:     itemSkipPath,
-				JsonPath: itemSkipJsonPath,
-			}
-			skipFieldZeroValues[item] = itemZeroValue
-			if !(itemSkip || itemSkipAll) {
-				itemZeroValue.ZeroValue = nodeSkip.NodeZeroValue()
-			}
+			skipFieldJsonPaths[item] = itemSkipJsonPath
 		}
 		skipAll = objectSkipFieldCount == len(value.Fields)
 	}
@@ -126,22 +119,13 @@ func (r *Resolver) runDelayFuncOrSkip(ctx *Context, field *Field, data []byte, o
 	return
 }
 
-func (r *Resolver) setZeroValueOrSkip(ctx *Context, field *Field, data []byte) (fieldData []byte, skip bool) {
-	if nodeZero, ok := ctx.skipFieldZeroValues[field]; ok {
-		if skip = nodeZero.ZeroValue == nil; skip {
-			return
-		}
-
-		if len(nodeZero.Path) > 0 {
-			fieldData, _ = jsonparser.Set(data, nodeZero.ZeroValue, nodeZero.Path...)
-		} else {
-			fieldData = nodeZero.ZeroValue
-		}
+func (r *Resolver) skipFieldRequired(ctx *Context, field *Field) (skip bool) {
+	if _, skip = ctx.skipFieldJsonPaths[field]; skip {
 		return
 	}
 
-	if skip = field.skipRequired(ctx); !skip {
-		fieldData = data
+	if skip = field.skipRequired(ctx); skip {
+		return
 	}
 	return
 }
@@ -254,10 +238,10 @@ func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables map[string
 
 func (s *resultSet) renderInputTemplate(ctx *Context, fetch *SingleFetch, data []byte, preparedInput *fastbuffer.FastBuffer) error {
 	inputTemplate := fetch.InputTemplate
-	if skipFieldZeroValues, ok := s.skipBufferFieldZeroValues[fetch.BufferId]; ok && inputTemplate.ResetInputTemplateFunc != nil {
-		skipFieldJsonPaths := make(map[string]bool, len(skipFieldZeroValues))
-		for _, item := range skipFieldZeroValues {
-			skipFieldJsonPaths[strings.Join(item.JsonPath, ".")] = true
+	if skipJsonPaths, ok := s.skipBufferFieldJsonPaths[fetch.BufferId]; ok && inputTemplate.ResetInputTemplateFunc != nil {
+		skipFieldJsonPaths := make(map[string]bool, len(skipJsonPaths))
+		for _, item := range skipJsonPaths {
+			skipFieldJsonPaths[strings.Join(item, ".")] = true
 		}
 		inputTemplate = inputTemplate.ResetInputTemplateFunc(ctx, skipFieldJsonPaths)
 	}
