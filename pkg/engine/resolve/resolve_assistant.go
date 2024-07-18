@@ -72,10 +72,13 @@ func (r *Resolver) searchSkipFields(ctx *Context, skipFieldZeroValues map[*Field
 			}
 
 			objectSkipFieldCount++
-			skipFieldZeroValues[item] = &NodeZeroValue{
-				Path:      itemSkipPath,
-				JsonPath:  itemSkipJsonPath,
-				ZeroValue: nodeSkip.NodeZeroValue(!itemSkip && itemSkipAll),
+			itemZeroValue := &NodeZeroValue{
+				Path:     itemSkipPath,
+				JsonPath: itemSkipJsonPath,
+			}
+			skipFieldZeroValues[item] = itemZeroValue
+			if !(itemSkip || itemSkipAll) {
+				itemZeroValue.ZeroValue = nodeSkip.NodeZeroValue()
 			}
 		}
 		skipAll = objectSkipFieldCount == len(value.Fields)

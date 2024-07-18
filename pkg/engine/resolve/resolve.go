@@ -89,7 +89,7 @@ type Node interface {
 
 type NodeSkip interface {
 	NodePath() []string
-	NodeZeroValue(bool) []byte
+	NodeZeroValue() []byte
 }
 
 type NodeZeroValue struct {
@@ -1541,10 +1541,7 @@ func (e *Object) NodePath() []string {
 	return e.Path
 }
 
-func (e *Object) NodeZeroValue(skipAll bool) []byte {
-	if e.Nullable && !skipAll {
-		return nil
-	}
+func (e *Object) NodeZeroValue() []byte {
 	return literal.ZeroObjectValue
 }
 
@@ -1721,10 +1718,7 @@ func (e *String) NodePath() []string {
 	return e.Path
 }
 
-func (e *String) NodeZeroValue(bool) []byte {
-	if e.Nullable {
-		return nil
-	}
+func (e *String) NodeZeroValue() []byte {
 	return literal.ZeroStringWithQuoteValue
 }
 
@@ -1749,10 +1743,7 @@ func (e *Boolean) NodePath() []string {
 	return e.Path
 }
 
-func (e *Boolean) NodeZeroValue(bool) []byte {
-	if e.Nullable {
-		return nil
-	}
+func (e *Boolean) NodeZeroValue() []byte {
 	return literal.FALSE
 }
 
@@ -1777,10 +1768,7 @@ func (e *Float) NodePath() []string {
 	return e.Path
 }
 
-func (e *Float) NodeZeroValue(bool) []byte {
-	if e.Nullable {
-		return nil
-	}
+func (e *Float) NodeZeroValue() []byte {
 	return literal.ZeroNumberValue
 }
 
@@ -1805,10 +1793,7 @@ func (e *Integer) NodePath() []string {
 	return e.Path
 }
 
-func (e *Integer) NodeZeroValue(bool) []byte {
-	if e.Nullable {
-		return nil
-	}
+func (e *Integer) NodeZeroValue() []byte {
 	return literal.ZeroNumberValue
 }
 
@@ -1841,10 +1826,7 @@ func (e *Array) NodePath() []string {
 	return e.Path
 }
 
-func (e *Array) NodeZeroValue(skipAll bool) []byte {
-	if e.Nullable && !skipAll {
-		return nil
-	}
+func (e *Array) NodeZeroValue() []byte {
 	return literal.ZeroArrayValue
 }
 
