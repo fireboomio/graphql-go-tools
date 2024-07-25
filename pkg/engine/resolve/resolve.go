@@ -909,6 +909,10 @@ func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte, 
 		dataValue, dataType, _, _ := jsonparser.Get(ctx.Variables, export.Path...)
 		switch dataType {
 		case jsonparser.Array:
+			if bytes.Equal(ctx.pathElements[len(ctx.pathElements)-1], literal.ZeroNumberValue) {
+				dataValue = []byte("[")
+				break
+			}
 			var expectedIndex int
 			_, _ = jsonparser.ArrayEach(dataValue, func([]byte, jsonparser.ValueType, int, error) {
 				expectedIndex++
