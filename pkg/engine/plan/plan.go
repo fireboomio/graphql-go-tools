@@ -748,11 +748,13 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 				}
 			default:
 				return &resolve.String{
-					Path:                 path,
-					Nullable:             nullable,
-					Export:               fieldExport,
-					DateFormatArguments:  v.resolveDateFormatArguments(fieldRef),
-					UnescapeResponseJson: unescapeResponseJson || fieldConfig == nil && strings.EqualFold(typeName, "JSON"),
+					Path:                path,
+					Nullable:            nullable,
+					Export:              fieldExport,
+					DateFormatArguments: v.resolveDateFormatArguments(fieldRef),
+					UnescapeResponseJson: unescapeResponseJson ||
+						fieldConfig == nil && strings.EqualFold(typeName, "JSON") ||
+						strings.HasSuffix(typeName, "Map"),
 				}
 			}
 		case ast.NodeKindEnumTypeDefinition:
