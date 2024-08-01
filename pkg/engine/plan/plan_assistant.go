@@ -134,6 +134,15 @@ func (v *Visitor) resolveSkipVariables(ref int) []resolve.SkipVariableDirective 
 	return field
 }
 
+func (v *Visitor) containsFirstRawResult(ref int) bool {
+	for _, i := range v.Operation.Fields[ref].Directives.Refs {
+		if v.Operation.DirectiveNameString(i) == "firstRawResult" {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *Visitor) setSkipVariableFuncForFetch(internal objectFetchConfiguration, fetch *resolve.SingleFetch) {
 	if internal.object == nil || len(internal.object.Fields) == 0 {
 		return

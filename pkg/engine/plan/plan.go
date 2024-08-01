@@ -751,6 +751,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 					Path:                path,
 					Nullable:            nullable,
 					Export:              fieldExport,
+					FirstRawResult:      v.containsFirstRawResult(fieldRef),
 					DateFormatArguments: v.resolveDateFormatArguments(fieldRef),
 					UnescapeResponseJson: unescapeResponseJson ||
 						fieldConfig == nil && strings.EqualFold(typeName, "JSON") ||

@@ -994,23 +994,27 @@ const (
 type (
 	QueryRawType struct {
 		FieldIndex int
-		ValueTypes map[string]string
+		ValueTypes map[string]*QueryRawValueType
+	}
+	QueryRawValueType struct {
+		Type  string
+		Items *QueryRawValueType
 	}
 	QueryRawResp struct{}
 )
 
-func handleQueryRawResp(ctx *Context, value, data []byte) (result []byte) {
+func handleQueryRawResp(ctx *Context, value, data []byte, firstRawResult bool) (result []byte) {
 	if data, _, _, _ = jsonparser.Get(data, queryRawKey); data == nil {
 		return
 	}
 
 	var (
-		rawValueTypes         map[string]string
+		rawValueTypes         map[string]*QueryRawValueType
 		rawValueTypesRequired bool
 	)
 	if rawTypes, typesFound := ctx.Value(QueryRawResp{}).(map[string]*QueryRawType); typesFound {
 		if rawType, typeFound := rawTypes[getRawFieldPath(ctx)]; typeFound {
-			rawType.ValueTypes = make(map[string]string)
+			rawType.ValueTypes = make(map[string]*QueryRawValueType)
 			rawValueTypes, rawValueTypesRequired = rawType.ValueTypes, true
 		}
 	}
@@ -1019,16 +1023,20 @@ func handleQueryRawResp(ctx *Context, value, data []byte) (result []byte) {
 		itemObjectIndex++
 		_ = jsonparser.ObjectEach(itemObject, func(key []byte, itemRaw []byte, _ jsonparser.ValueType, _ int) error {
 			itemKey := string(key)
-			itemObject, _ = jsonparser.Set(itemObject, getValueBytes(itemRaw, prismaValueKey, true), itemKey)
+			rawValueType, itemValue := resolveQueryRawValue(itemRaw)
+			itemObject, _ = jsonparser.Set(itemObject, itemValue, itemKey)
 			if rawValueTypesRequired {
-				if prismaType, ok := rawValueTypes[itemKey]; !ok || prismaType == "null" {
-					rawValueTypes[itemKey] = string(getValueBytes(itemRaw, prismaTypeKey, false))
+				if rawValue, ok := rawValueTypes[itemKey]; !ok || rawValue.Type == "null" {
+					rawValueTypes[itemKey] = rawValueType
 				}
 			}
 			return nil
 		})
 		result, _ = jsonparser.Set(result, itemObject, fmt.Sprintf("[%d]", itemObjectIndex))
 	})
+	if firstRawResult && itemObjectIndex > -1 {
+		result, _, _, _ = jsonparser.Get(result, "[0]")
+	}
 	return
 }
 
@@ -1042,12 +1050,34 @@ func getRawFieldPath(ctx *Context) string {
 	return buf.String()[:buf.Len()-1]
 }
 
-func getValueBytes(data []byte, key string, matchValueType bool) []byte {
-	value, valueType, offset, _ := jsonparser.Get(data, key)
-	if matchValueType && valueType == jsonparser.String {
-		value = data[offset-len(value)-2 : offset]
-	}
-	return value
+func resolveQueryRawValue(rawValue []byte) (rawValueType *QueryRawValueType, data []byte) {
+	rawValueType = &QueryRawValueType{}
+	_ = jsonparser.ObjectEach(rawValue, func(key []byte, value []byte, valueType jsonparser.ValueType, offset int) error {
+		switch string(key) {
+		case prismaTypeKey:
+			rawValueType.Type = string(value)
+		case prismaValueKey:
+			switch valueType {
+			case jsonparser.Array:
+				data = []byte("[")
+				_, _ = jsonparser.ArrayEach(value, func(itemValue []byte, _ jsonparser.ValueType, _ int, _ error) {
+					itemValueType, itemData := resolveQueryRawValue(itemValue)
+					rawValueType.Items = itemValueType
+					if len(data) > 1 {
+						data = append(data, literal.COMMA...)
+					}
+					data = append(data, itemData...)
+				})
+				data = append(data, literal.RBRACK...)
+			case jsonparser.String:
+				data = rawValue[offset-len(value)-2 : offset]
+			default:
+				data = value
+			}
+		}
+		return nil
+	})
+	return
 }
 
 const executeRawKey = "executeRaw"
@@ -1090,7 +1120,7 @@ func (r *Resolver) resolveString(ctx *Context, str *String, data []byte, stringB
 			}
 		}
 		if value != nil && valueType != jsonparser.Null {
-			if raw := handleQueryRawResp(ctx, value, data); raw != nil {
+			if raw := handleQueryRawResp(ctx, value, data, str.FirstRawResult); raw != nil {
 				stringBuf.Data.WriteBytes(raw)
 				return nil
 			}
@@ -1701,6 +1731,7 @@ type String struct {
 	UnescapeResponseJson bool              `json:"unescape_response_json,omitempty"`
 	IsTypeName           bool              `json:"is_type_name,omitempty"`
 	DateFormatArguments  map[string]string `json:"-"`
+	FirstRawResult       bool
 }
 
 func (_ *String) NodeKind() NodeKind {
