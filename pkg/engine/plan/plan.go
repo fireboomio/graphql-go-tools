@@ -749,7 +749,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 			default:
 				isJsonResult := strings.HasSuffix(typeName, "Map") ||
 					fieldConfig == nil && strings.EqualFold(typeName, "JSON")
-				if isJsonResult {
+				if fieldExport != nil && isJsonResult {
 					fieldExport.AsString = false
 				}
 				return &resolve.String{
