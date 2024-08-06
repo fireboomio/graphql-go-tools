@@ -11,7 +11,23 @@ import (
 
 func (v *Visitor) setWaitExportedRequiredForArguments(config objectFetchConfiguration) {
 	objectPopField := config.objectPopField
-	if objectPopField == nil || objectPopField.WaitExportedRequired || objectPopField.LengthOfExportedBefore == 0 {
+	if objectPopField == nil {
+		parallelFetch, ok := config.object.Fetch.(*resolve.ParallelFetch)
+		if !ok {
+			return
+		}
+		lastFetch := v.getLastFromParallelFetch(parallelFetch)
+		if lastFetch.DisallowParallelFetch {
+			return
+		}
+		v.matchExportVariables(lastFetch.Variables, func(string, int) bool {
+			lastFetch.DisallowParallelFetch = true
+			return true
+		})
+		return
+	}
+
+	if objectPopField.WaitExportedRequired || objectPopField.LengthOfExportedBefore == 0 {
 		return
 	}
 	for _, item := range config.object.Fields {
@@ -27,9 +43,19 @@ func (v *Visitor) setWaitExportedRequiredForArguments(config objectFetchConfigur
 		variables = f.Variables
 	case *resolve.BatchFetch:
 		variables = f.Fetch.Variables
-	default:
-		return
+	case *resolve.ParallelFetch:
+		variables = v.getLastFromParallelFetch(f).Variables
 	}
+	v.matchExportVariables(variables, func(_ string, index int) bool {
+		matched := index < objectPopField.LengthOfExportedBefore
+		if matched {
+			objectPopField.WaitExportedRequired = true
+		}
+		return matched
+	})
+}
+
+func (v *Visitor) matchExportVariables(variables resolve.Variables, match func(string, int) bool) {
 	for _, item := range variables {
 		if item.GetVariableKind() != resolve.ContextVariableKind {
 			continue
@@ -39,12 +65,21 @@ func (v *Visitor) setWaitExportedRequiredForArguments(config objectFetchConfigur
 			continue
 		}
 		for variable, index := range v.exportedVariables {
-			if variable == segment.VariableSourcePath[0] && index < objectPopField.LengthOfExportedBefore {
-				objectPopField.WaitExportedRequired = true
+			if variable == segment.VariableSourcePath[0] && match(variable, index) {
 				return
 			}
 		}
 	}
+}
+
+func (v *Visitor) getLastFromParallelFetch(parallelFetch *resolve.ParallelFetch) (fetch *resolve.SingleFetch) {
+	switch ff := parallelFetch.Fetches[len(parallelFetch.Fetches)-1].(type) {
+	case *resolve.SingleFetch:
+		fetch = ff
+	case *resolve.BatchFetch:
+		fetch = ff.Fetch
+	}
+	return
 }
 
 func (v *Visitor) resetWaitExportedRequired(ref int) {
