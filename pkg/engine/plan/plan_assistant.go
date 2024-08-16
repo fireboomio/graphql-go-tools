@@ -17,11 +17,18 @@ func (v *Visitor) setWaitExportedRequiredForArguments(config objectFetchConfigur
 			return
 		}
 		lastFetch := v.getLastFromParallelFetch(parallelFetch)
-		if lastFetch.DisallowParallelFetch {
+		var lastField *resolve.Field
+		for _, item := range config.object.Fields {
+			if lastFetch.BufferId == item.BufferID {
+				lastField = item
+				break
+			}
+		}
+		if lastField == nil || lastField.WaitExportedRequired {
 			return
 		}
 		v.matchExportVariables(lastFetch.Variables, func(string, int) bool {
-			lastFetch.DisallowParallelFetch = true
+			lastField.WaitExportedRequired = true
 			return true
 		})
 		return
