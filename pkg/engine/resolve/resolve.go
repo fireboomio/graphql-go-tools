@@ -191,6 +191,7 @@ func (c *Context) Clone() Context {
 	return Context{
 		Context:          c.Context,
 		RuleEvaluate:     c.RuleEvaluate,
+		DateFormatFunc:   c.DateFormatFunc,
 		Variables:        variables,
 		Request:          c.Request,
 		pathElements:     pathElements,
@@ -218,6 +219,7 @@ func (c *Context) Value(key any) any {
 func (c *Context) Free() {
 	c.Context = nil
 	c.RuleEvaluate = nil
+	c.DateFormatFunc = nil
 	c.Variables = c.Variables[:0]
 	c.Request.Header = nil
 	c.pathElements = c.pathElements[:0]
