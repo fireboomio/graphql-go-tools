@@ -782,7 +782,8 @@ func (r *Resolver) resolveArray(ctx *Context, array *Array, data []byte, arrayBu
 	ctx.addResponseArrayElements(array.Path)
 	defer func() { ctx.removeResponseArrayLastElements(array.Path) }()
 
-	if array.ResolveAsynchronous && !array.Stream.Enabled && !r.dataLoaderEnabled {
+	// if array.ResolveAsynchronous && !array.Stream.Enabled && !r.dataLoaderEnabled {
+	if array.ResolveAsynchronous && !array.Stream.Enabled {
 		return r.resolveArrayAsynchronous(ctx, array, arrayItems, arrayBuf)
 	}
 	return r.resolveArraySynchronous(ctx, array, arrayItems, arrayBuf)

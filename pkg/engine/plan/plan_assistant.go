@@ -152,6 +152,21 @@ func (v *Visitor) resolveDateFormatArguments(fieldRef int) map[string]string {
 	return nil
 }
 
+const asyncResolveDirective = "asyncResolve"
+
+func (v *Visitor) resolveAsyncResolve(fieldRef int) bool {
+	if !v.Operation.Fields[fieldRef].HasDirectives {
+		return false
+	}
+
+	for _, ref := range v.Operation.Fields[fieldRef].Directives.Refs {
+		if v.Operation.Input.ByteSliceString(v.Operation.Directives[ref].Name) == asyncResolveDirective {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *Visitor) resolveSkipVariables(ref int) []resolve.SkipVariableDirective {
 	var field []resolve.SkipVariableDirective
 	for _, i := range v.Operation.Fields[ref].Directives.Refs {

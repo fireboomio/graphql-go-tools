@@ -707,9 +707,10 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 	case ast.TypeKindList:
 		listItem := v.resolveFieldValue(fieldRef, ofType, true, nil)
 		return &resolve.Array{
-			Nullable: nullable,
-			Path:     path,
-			Item:     listItem,
+			Nullable:            nullable,
+			Path:                path,
+			Item:                listItem,
+			ResolveAsynchronous: v.resolveAsyncResolve(fieldRef),
 		}
 	case ast.TypeKindNamed:
 		typeName := v.Definition.ResolveTypeNameString(typeRef)
