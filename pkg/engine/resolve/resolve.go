@@ -91,6 +91,10 @@ type NodePath interface {
 	NodePath() []string
 }
 
+type NodeZeroValue interface {
+	NodeZeroValue() []byte
+}
+
 type NodeKind int
 type FetchKind int
 
@@ -1360,6 +1364,11 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 
 			return
 		}
+		if err = r.resolveTransform(ctx, field, fieldBuf); err != nil {
+			objectBuf.Data.Reset()
+			objectBuf.Errors.WriteString(err.Error())
+			return
+		}
 		r.MergeBufPairs(fieldBuf, objectBuf, false)
 	}
 	allSkipped := len(object.Fields) != 0 && len(object.Fields) == skipCount
@@ -1571,6 +1580,13 @@ func (e *Object) NodePath() []string {
 	return e.Path
 }
 
+func (e *Object) NodeZeroValue() []byte {
+	if e.Nullable {
+		return literal.NULL
+	}
+	return literal.ZeroObjectValue
+}
+
 func (e *Object) ExportedVariables() (variables []string) {
 	for _, field := range e.Fields {
 		if export, ok := field.Value.(FieldExportVariable); ok {
@@ -1592,6 +1608,10 @@ func (_ *EmptyArray) NodeKind() NodeKind {
 	return NodeKindEmptyArray
 }
 
+func (_ *EmptyArray) NodeZeroValue() []byte {
+	return literal.ZeroObjectValue
+}
+
 type Field struct {
 	Name                     []byte
 	Value                    Node
@@ -1603,6 +1623,7 @@ type Field struct {
 	OnTypeName               []byte
 	SkipDirective            SkipDirective
 	IncludeDirective         IncludeDirective
+	TransformDirective       TransformDirective
 	SkipVariableDirectives   []SkipVariableDirective
 	LengthOfExportedBefore   int
 	WaitExportedRequired     bool
@@ -1655,6 +1676,10 @@ type Defer struct {
 
 func (_ *Null) NodeKind() NodeKind {
 	return NodeKindNull
+}
+
+func (e *Null) NodeZeroValue() []byte {
+	return literal.NULL
 }
 
 type resultSet struct {
@@ -1745,6 +1770,13 @@ func (e *String) NodePath() []string {
 	return e.Path
 }
 
+func (e *String) NodeZeroValue() []byte {
+	if e.Nullable {
+		return literal.NULL
+	}
+	return literal.ZeroStringWithQuoteValue
+}
+
 func (e *String) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1764,6 +1796,13 @@ func (_ *Boolean) NodeKind() NodeKind {
 
 func (e *Boolean) NodePath() []string {
 	return e.Path
+}
+
+func (e *Boolean) NodeZeroValue() []byte {
+	if e.Nullable {
+		return literal.NULL
+	}
+	return literal.FALSE
 }
 
 func (e *Boolean) ExportedVariables() (variables []string) {
@@ -1787,6 +1826,13 @@ func (e *Float) NodePath() []string {
 	return e.Path
 }
 
+func (e *Float) NodeZeroValue() []byte {
+	if e.Nullable {
+		return literal.NULL
+	}
+	return literal.ZeroNumberValue
+}
+
 func (e *Float) ExportedVariables() (variables []string) {
 	if e.Export != nil {
 		variables = append(variables, e.Export.Path[0])
@@ -1806,6 +1852,13 @@ func (_ *Integer) NodeKind() NodeKind {
 
 func (e *Integer) NodePath() []string {
 	return e.Path
+}
+
+func (e *Integer) NodeZeroValue() []byte {
+	if e.Nullable {
+		return literal.NULL
+	}
+	return literal.ZeroNumberValue
 }
 
 func (e *Integer) ExportedVariables() (variables []string) {
@@ -1835,6 +1888,13 @@ func (_ *Array) NodeKind() NodeKind {
 
 func (e *Array) NodePath() []string {
 	return e.Path
+}
+
+func (e *Array) NodeZeroValue() []byte {
+	if e.Nullable {
+		return literal.NULL
+	}
+	return literal.ZeroArrayValue
 }
 
 func (e *Array) ExportedVariables() (variables []string) {

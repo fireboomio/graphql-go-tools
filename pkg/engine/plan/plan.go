@@ -665,6 +665,7 @@ func (v *Visitor) resolveOnTypeName() []byte {
 
 func (v *Visitor) LeaveField(ref int) {
 	v.resetWaitExportedRequired(ref)
+	v.resolveTransform(ref)
 	if v.currentFields[len(v.currentFields)-1].popFieldRef == ref {
 		v.currentFields = v.currentFields[:len(v.currentFields)-1]
 		delete(v.currentFieldIndexes, ref)

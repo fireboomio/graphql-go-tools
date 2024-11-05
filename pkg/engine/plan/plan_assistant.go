@@ -91,7 +91,7 @@ func (v *Visitor) getLastFromParallelFetch(parallelFetch *resolve.ParallelFetch)
 
 func (v *Visitor) resetWaitExportedRequired(ref int) {
 	index, ok := v.currentFieldIndexes[ref]
-	if !ok || index >= len(v.currentFieldIndexes) {
+	if !ok || index >= len(v.currentFields) {
 		return
 	}
 
@@ -168,7 +168,7 @@ func (v *Visitor) resolveAsyncResolve(fieldRef int) bool {
 }
 
 func (v *Visitor) resolveSkipVariables(ref int) []resolve.SkipVariableDirective {
-	var field []resolve.SkipVariableDirective
+	var directives []resolve.SkipVariableDirective
 	for _, i := range v.Operation.Fields[ref].Directives.Refs {
 		if v.Operation.DirectiveNameString(i) != "skipVariable" {
 			continue
@@ -186,9 +186,9 @@ func (v *Visitor) resolveSkipVariables(ref int) []resolve.SkipVariableDirective 
 				itemDirective.Expression = v.Operation.ValueContentString(value)
 			}
 		}
-		field = append(field, itemDirective)
+		directives = append(directives, itemDirective)
 	}
-	return field
+	return directives
 }
 
 func (v *Visitor) containsFirstRawResult(ref int) bool {
