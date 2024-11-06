@@ -83,7 +83,7 @@ func (v *Visitor) resolveTransformForChildren(fieldValue resolve.Node, transform
 		v.Walker.StopWithInternalErr(fmt.Errorf("invalid path [%s] @transform", strings.Join(transform.Get[:pathIndex+1], ".")))
 		return false
 	case *resolve.String:
-		if slices.Contains(ret.Path, resolve.QueryRawKey) || slices.Contains(ret.Path, resolve.ExecuteRawKey) {
+		if slices.Contains(ret.Path, resolve.QueryRawKey) {
 			ret.TransformFieldName = transform.Get[pathIndex]
 			transform.ArrayWalked = !ret.FirstRawResult
 			return true

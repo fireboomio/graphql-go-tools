@@ -1087,7 +1087,7 @@ func resolveQueryRawValue(rawValue []byte) (rawValueType *QueryRawValueType, dat
 	return
 }
 
-const ExecuteRawKey = "executeRaw"
+const executeRawKey = "executeRaw"
 
 type (
 	ExecuteRawType struct {
@@ -1098,7 +1098,7 @@ type (
 )
 
 func handleExecuteRawResp(ctx *Context, value, data []byte) []byte {
-	data, dataType, _, _ := jsonparser.Get(data, ExecuteRawKey)
+	data, dataType, _, _ := jsonparser.Get(data, executeRawKey)
 	if data == nil {
 		return nil
 	}
