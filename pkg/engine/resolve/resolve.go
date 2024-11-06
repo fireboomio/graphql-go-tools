@@ -995,7 +995,7 @@ func (r *Resolver) resolveBoolean(ctx *Context, boolean *Boolean, data []byte, b
 const (
 	prismaTypeKey  = "prisma__type"
 	prismaValueKey = "prisma__value"
-	queryRawKey    = "queryRaw"
+	QueryRawKey    = "queryRaw"
 )
 
 type (
@@ -1011,7 +1011,7 @@ type (
 )
 
 func handleQueryRawResp(ctx *Context, value, data []byte, firstRawResult bool) (result []byte) {
-	if data, _, _, _ = jsonparser.Get(data, queryRawKey); data == nil {
+	if data, _, _, _ = jsonparser.Get(data, QueryRawKey); data == nil {
 		return
 	}
 
@@ -1087,7 +1087,7 @@ func resolveQueryRawValue(rawValue []byte) (rawValueType *QueryRawValueType, dat
 	return
 }
 
-const executeRawKey = "executeRaw"
+const ExecuteRawKey = "executeRaw"
 
 type (
 	ExecuteRawType struct {
@@ -1098,7 +1098,7 @@ type (
 )
 
 func handleExecuteRawResp(ctx *Context, value, data []byte) []byte {
-	data, dataType, _, _ := jsonparser.Get(data, executeRawKey)
+	data, dataType, _, _ := jsonparser.Get(data, ExecuteRawKey)
 	if data == nil {
 		return nil
 	}
@@ -1364,7 +1364,7 @@ func (r *Resolver) resolveObject(ctx *Context, object *Object, data []byte, obje
 
 			return
 		}
-		if err = r.resolveTransform(ctx, field, fieldBuf); err != nil {
+		if err = r.resolveTransformFieldBuf(ctx, field, fieldBuf); err != nil {
 			objectBuf.Data.Reset()
 			objectBuf.Errors.WriteString(err.Error())
 			return
@@ -1565,11 +1565,13 @@ func (r *Resolver) resolveSingleFetch(ctx *Context, fetch *SingleFetch, data []b
 }
 
 type Object struct {
-	Nullable             bool
-	Path                 []string
-	Fields               []*Field
-	Fetch                Fetch
-	UnescapeResponseJson bool `json:"unescape_response_json,omitempty"`
+	Nullable               bool
+	Path                   []string
+	Fields                 []*Field
+	Fetch                  Fetch
+	UnescapeResponseJson   bool `json:"unescape_response_json,omitempty"`
+	TransformFieldIndex    int
+	TransformFieldRequired bool
 }
 
 func (_ *Object) NodeKind() NodeKind {
@@ -1628,6 +1630,7 @@ type Field struct {
 	LengthOfExportedBefore   int
 	WaitExportedRequired     bool
 	WaitExportedRequiredFunc func(*Context) bool
+	TransformRequired        bool
 
 	// deprecated, only test on use
 	SkipDirectiveDefined bool
@@ -1760,6 +1763,7 @@ type String struct {
 	IsTypeName           bool              `json:"is_type_name,omitempty"`
 	DateFormatArguments  map[string]string `json:"-"`
 	FirstRawResult       bool
+	TransformFieldName   string
 }
 
 func (_ *String) NodeKind() NodeKind {
@@ -1869,11 +1873,12 @@ func (e *Integer) ExportedVariables() (variables []string) {
 }
 
 type Array struct {
-	Path                []string
-	Nullable            bool
-	ResolveAsynchronous bool
-	Item                Node
-	Stream              Stream
+	Path                  []string
+	Nullable              bool
+	ResolveAsynchronous   bool
+	Item                  Node
+	Stream                Stream
+	TransformItemRequired bool
 }
 
 type Stream struct {
