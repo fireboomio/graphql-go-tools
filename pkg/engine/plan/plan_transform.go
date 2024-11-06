@@ -73,10 +73,9 @@ func (v *Visitor) resolveTransformForChildren(fieldValue resolve.Node, transform
 		fieldName := transform.Get[pathIndex]
 		for i := range ret.Fields {
 			if string(ret.Fields[i].Name) == fieldName {
-				pathIndex++
 				ret.TransformFieldIndex = i
 				ret.TransformFieldRequired = true
-				ret.Fields[i].TransformRequired = v.resolveTransformForChildren(ret.Fields[i].Value, transform, pathIndex) || ret.Fields[i].TransformRequired
+				ret.Fields[i].TransformRequired = v.resolveTransformForChildren(ret.Fields[i].Value, transform, pathIndex+1) || ret.Fields[i].TransformRequired
 				return true
 			}
 		}
@@ -86,6 +85,7 @@ func (v *Visitor) resolveTransformForChildren(fieldValue resolve.Node, transform
 		if slices.Contains(ret.Path, resolve.QueryRawKey) {
 			ret.TransformFieldName = transform.Get[pathIndex]
 			transform.ArrayWalked = !ret.FirstRawResult
+			v.resolveTransformForChildren(&resolve.Null{}, transform, pathIndex+1)
 			return true
 		}
 	}
