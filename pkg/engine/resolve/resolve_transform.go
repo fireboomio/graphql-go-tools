@@ -47,24 +47,7 @@ func (r *Resolver) resolveTransformNodeData(node Node, nodeData []byte) ([]byte,
 			return nodeData, false
 		}
 
-		dataBuf := r.getBufPair()
-		defer r.freeBufPair(dataBuf)
-		first := true
-		dataBuf.Data.WriteBytes(literal.LBRACK)
-		_, _ = jsonparser.ArrayEach(nodeData, func(itemData []byte, itemType jsonparser.ValueType, itemOffset int, _ error) {
-			if itemType == jsonparser.String {
-				itemData = nodeData[itemOffset-len(itemData)-2 : itemOffset]
-			}
-			if first {
-				first = false
-			} else {
-				dataBuf.Data.WriteBytes(literal.COMMA)
-			}
-			itemData, _ = r.resolveTransformNodeData(ret.Item, itemData)
-			dataBuf.Data.WriteBytes(itemData)
-		})
-		dataBuf.Data.WriteBytes(literal.RBRACK)
-		return dataBuf.Data.Bytes(), true
+		return r.resolveTransformArrayData(ret.Item, nodeData), true
 	case *Object:
 		if !ret.TransformFieldRequired {
 			return nodeData, false
@@ -78,14 +61,43 @@ func (r *Resolver) resolveTransformNodeData(node Node, nodeData []byte) ([]byte,
 		if len(ret.TransformFieldName) == 0 {
 			return nodeData, false
 		}
-		data, dataType, dataOffset, _ := jsonparser.Get(nodeData, ret.TransformFieldName)
-		if dataType == jsonparser.String {
-			data = nodeData[dataOffset-len(data)-2 : dataOffset]
+		if ret.FirstRawResult {
+			data, dataType, dataOffset, _ := jsonparser.Get(nodeData, ret.TransformFieldName)
+			if dataType == jsonparser.String {
+				data = nodeData[dataOffset-len(data)-2 : dataOffset]
+			}
+			return data, true
 		}
-		return data, true
+		if bytes.Equal(nodeData, literal.ZeroArrayValue) {
+			return nodeData, true
+		}
+		retCopy := *ret
+		retCopy.FirstRawResult = true
+		return r.resolveTransformArrayData(&retCopy, nodeData), true
 	default:
 		return nodeData, false
 	}
+}
+
+func (r *Resolver) resolveTransformArrayData(arrayitem Node, arrayData []byte) []byte {
+	dataBuf := r.getBufPair()
+	defer r.freeBufPair(dataBuf)
+	first := true
+	dataBuf.Data.WriteBytes(literal.LBRACK)
+	_, _ = jsonparser.ArrayEach(arrayData, func(itemData []byte, itemType jsonparser.ValueType, itemOffset int, _ error) {
+		if itemType == jsonparser.String {
+			itemData = arrayData[itemOffset-len(itemData)-2 : itemOffset]
+		}
+		if first {
+			first = false
+		} else {
+			dataBuf.Data.WriteBytes(literal.COMMA)
+		}
+		itemData, _ = r.resolveTransformNodeData(arrayitem, itemData)
+		dataBuf.Data.WriteBytes(itemData)
+	})
+	dataBuf.Data.WriteBytes(literal.RBRACK)
+	return dataBuf.Data.Bytes()
 }
 
 func (r *Resolver) resolveTransformFieldBuf(ctx *Context, field *Field, fieldBuf *BufPair) error {

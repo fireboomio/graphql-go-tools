@@ -21,6 +21,7 @@ func (v *Visitor) resolveTransform(ref int) {
 
 		currentField.TransformRequired = true
 		currentField.TransformDirective.Defined = true
+		currentField.TransformDirective.ArrayWalked = currentField.Value.NodeKind() == resolve.NodeKindArray
 		if value, ok := v.Operation.DirectiveArgumentValueByName(i, resolve.TransformArgGet); ok {
 			for _, item := range strings.Split(v.Operation.ValueContentString(value), ".") {
 				if item != "[]" && item != "" {
@@ -28,10 +29,27 @@ func (v *Visitor) resolveTransform(ref int) {
 				}
 			}
 		}
-		if value, ok := v.Operation.DirectiveArgumentValueByName(i, resolve.TransformArgMath); ok {
-			currentField.TransformDirective.Math = resolve.TransformMath(v.Operation.ValueContentString(value))
-		}
 		v.resolveTransformForChildren(currentField.Value, &currentField.TransformDirective, 0)
+		if value, ok := v.Operation.DirectiveArgumentValueByName(i, resolve.TransformArgMath); ok {
+			if !currentField.TransformDirective.ArrayWalked {
+				v.Walker.StopWithInternalErr(fmt.Errorf("@transform with math can only be used on arrays"))
+				return
+			}
+			transformMath := resolve.TransformMath(v.Operation.ValueContentString(value))
+			transformGetNodeKind := currentField.TransformDirective.GetNode.NodeKind()
+			switch transformMath {
+			case resolve.TransformMathMax, resolve.TransformMathMin, resolve.TransformMathSum, resolve.TransformMathAvg:
+				if transformGetNodeKind != resolve.NodeKindInteger && transformGetNodeKind != resolve.NodeKindFloat {
+					v.Walker.StopWithInternalErr(fmt.Errorf("@transform math [%s] can only be used on integer or float values", transformMath))
+					return
+				}
+			case resolve.TransformMathFirst, resolve.TransformMathLast, resolve.TransformMathCount:
+			default:
+				v.Walker.StopWithInternalErr(fmt.Errorf("not support transform math [%s]", transformMath))
+				return
+			}
+			currentField.TransformDirective.Math = transformMath
+		}
 		return
 	}
 }
@@ -67,6 +85,7 @@ func (v *Visitor) resolveTransformForChildren(fieldValue resolve.Node, transform
 	case *resolve.String:
 		if slices.Contains(ret.Path, resolve.QueryRawKey) || slices.Contains(ret.Path, resolve.ExecuteRawKey) {
 			ret.TransformFieldName = transform.Get[pathIndex]
+			transform.ArrayWalked = !ret.FirstRawResult
 			return true
 		}
 	}
