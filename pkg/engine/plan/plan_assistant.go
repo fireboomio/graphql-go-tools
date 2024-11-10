@@ -64,15 +64,12 @@ func (v *Visitor) setWaitExportedRequiredForArguments(config objectFetchConfigur
 
 func (v *Visitor) matchExportVariables(variables resolve.Variables, match func(string, int) bool) {
 	for _, item := range variables {
-		if item.GetVariableKind() != resolve.ContextVariableKind {
+		ctxVariable, ok := item.(*resolve.ContextVariable)
+		if !ok || ctxVariable.Generated {
 			continue
 		}
-		segment := item.TemplateSegment()
-		if segment.VariableGenerated {
-			continue
-		}
-		for variable, index := range v.exportedVariables {
-			if variable == segment.VariableSourcePath[0] && match(variable, index) {
+		for variable, export := range v.exportedVariables {
+			if variable == ctxVariable.Path[0] && match(variable, export.Index) {
 				return
 			}
 		}

@@ -7,36 +7,39 @@ import (
 	"strings"
 )
 
-func (v *Visitor) resolveTransform(ref int) {
+func (v *Visitor) resolveTransformForObjectField(ref int) {
 	index, ok := v.currentFieldIndexes[ref]
 	if !ok || index >= len(v.currentFields) {
 		return
 	}
 
-	currentField := v.currentFields[index].popField
+	v.resolveTransformForField(ref, v.currentFields[index].popField)
+}
+
+func (v *Visitor) resolveTransformForField(ref int, field *resolve.Field) {
 	for _, i := range v.Operation.Fields[ref].Directives.Refs {
 		if v.Operation.DirectiveNameString(i) != "transform" {
 			continue
 		}
 
-		currentField.TransformRequired = true
-		currentField.TransformDirective.Defined = true
-		currentField.TransformDirective.ArrayWalked = currentField.Value.NodeKind() == resolve.NodeKindArray
+		field.TransformRequired = true
+		field.TransformDirective.Defined = true
+		field.TransformDirective.ArrayWalked = field.Value.NodeKind() == resolve.NodeKindArray
 		if value, ok := v.Operation.DirectiveArgumentValueByName(i, resolve.TransformArgGet); ok {
 			for _, item := range strings.Split(v.Operation.ValueContentString(value), ".") {
 				if item != "[]" && item != "" {
-					currentField.TransformDirective.Get = append(currentField.TransformDirective.Get, item)
+					field.TransformDirective.Get = append(field.TransformDirective.Get, item)
 				}
 			}
 		}
-		v.resolveTransformForChildren(currentField.Value, &currentField.TransformDirective, 0)
+		v.resolveTransformForFieldChildren(field.Value, &field.TransformDirective, 0)
 		if value, ok := v.Operation.DirectiveArgumentValueByName(i, resolve.TransformArgMath); ok {
-			if !currentField.TransformDirective.ArrayWalked {
+			if !field.TransformDirective.ArrayWalked {
 				v.Walker.StopWithInternalErr(fmt.Errorf("@transform with math can only be used on arrays"))
 				return
 			}
 			transformMath := resolve.TransformMath(v.Operation.ValueContentString(value))
-			transformGetNodeKind := currentField.TransformDirective.GetNode.NodeKind()
+			transformGetNodeKind := field.TransformDirective.GetNode.NodeKind()
 			switch transformMath {
 			case resolve.TransformMathMax, resolve.TransformMathMin, resolve.TransformMathSum, resolve.TransformMathAvg:
 				if transformGetNodeKind != resolve.NodeKindInteger && transformGetNodeKind != resolve.NodeKindFloat {
@@ -48,22 +51,23 @@ func (v *Visitor) resolveTransform(ref int) {
 				v.Walker.StopWithInternalErr(fmt.Errorf("not support transform math [%s]", transformMath))
 				return
 			}
-			currentField.TransformDirective.Math = transformMath
+			field.TransformDirective.Math = transformMath
 		}
 		return
 	}
 }
 
-func (v *Visitor) resolveTransformForChildren(fieldValue resolve.Node, transform *resolve.TransformDirective, pathIndex int) bool {
+func (v *Visitor) resolveTransformForFieldChildren(fieldValue resolve.Node, transform *resolve.TransformDirective, pathIndex int) bool {
 	if pathIndex == len(transform.Get) {
 		transform.GetNode = fieldValue
+		transform.ArrayWalked = transform.ArrayWalked || fieldValue.NodeKind() == resolve.NodeKindArray
 		return false
 	}
 
 	switch ret := fieldValue.(type) {
 	case *resolve.Array:
 		transform.ArrayWalked = true
-		ret.TransformItemRequired = v.resolveTransformForChildren(ret.Item, transform, pathIndex) || ret.TransformItemRequired
+		ret.TransformItemRequired = v.resolveTransformForFieldChildren(ret.Item, transform, pathIndex) || ret.TransformItemRequired
 		return true
 	case *resolve.Object:
 		if ret.TransformFieldRequired {
@@ -75,17 +79,17 @@ func (v *Visitor) resolveTransformForChildren(fieldValue resolve.Node, transform
 			if string(ret.Fields[i].Name) == fieldName {
 				ret.TransformFieldIndex = i
 				ret.TransformFieldRequired = true
-				ret.Fields[i].TransformRequired = v.resolveTransformForChildren(ret.Fields[i].Value, transform, pathIndex+1) || ret.Fields[i].TransformRequired
+				ret.Fields[i].TransformRequired = v.resolveTransformForFieldChildren(ret.Fields[i].Value, transform, pathIndex+1) || ret.Fields[i].TransformRequired
 				return true
 			}
 		}
 		v.Walker.StopWithInternalErr(fmt.Errorf("invalid path [%s] @transform", strings.Join(transform.Get[:pathIndex+1], ".")))
 		return false
 	case *resolve.String:
-		if slices.Contains(ret.Path, resolve.QueryRawKey) {
+		if slices.Contains(ret.Path, resolve.QueryRawKey) || ret.UnescapeResponseJson {
 			ret.TransformFieldName = transform.Get[pathIndex]
-			transform.ArrayWalked = !ret.FirstRawResult
-			v.resolveTransformForChildren(&resolve.Null{}, transform, pathIndex+1)
+			transform.ArrayWalked = transform.ArrayWalked || !ret.FirstRawResult
+			v.resolveTransformForFieldChildren(&resolve.Null{}, transform, pathIndex+1)
 			return true
 		}
 	}

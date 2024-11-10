@@ -166,7 +166,7 @@ func (f *Field) skipRequired(ctx *Context) (skipRequired bool) {
 	return
 }
 
-func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables map[string]int) {
+func (f *Field) SetWaitExportedRequiredForDirective(exportedVariables map[string]*FieldExport) {
 	f.LengthOfExportedBefore = len(exportedVariables)
 	if f.LengthOfExportedBefore == 0 || (!f.SkipDirective.Defined && !f.IncludeDirective.Defined) {
 		return

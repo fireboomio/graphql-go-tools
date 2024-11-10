@@ -920,13 +920,9 @@ func (r *Resolver) exportField(ctx *Context, export *FieldExport, value []byte, 
 				dataValue = []byte("[")
 				break
 			}
-			var expectedIndex int
-			_, _ = jsonparser.ArrayEach(dataValue, func([]byte, jsonparser.ValueType, int, error) {
-				expectedIndex++
-			})
 			copyValue := make([]byte, len(dataValue)-1)
 			copy(copyValue, dataValue)
-			if expectedIndex > 0 {
+			if len(dataValue) > len(literal.ZeroArrayValue) {
 				copyValue = append(copyValue, literal.COMMA...)
 			}
 			dataValue = copyValue
@@ -1746,9 +1742,11 @@ func (_ *BatchFetch) FetchKind() FetchKind {
 // and stores it in the variables using the Path as JSON pointer.
 type FieldExport struct {
 	Path      []string
+	FromArray bool
 	AsArray   bool
 	AsString  bool
 	AsBoolean bool
+	Index     int
 }
 
 type FieldExportVariable interface {

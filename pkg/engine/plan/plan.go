@@ -381,7 +381,7 @@ type Visitor struct {
 	fieldBuffers                 map[int]int
 	skipFieldPaths               []string
 	fieldConfigs                 map[int]*FieldConfiguration
-	exportedVariables            map[string]int
+	exportedVariables            map[string]*resolve.FieldExport
 	skipFields                   map[int]resolve.SkipDirective
 	includeFields                map[int]resolve.IncludeDirective
 	disableResolveFieldPositions bool
@@ -665,7 +665,7 @@ func (v *Visitor) resolveOnTypeName() []byte {
 
 func (v *Visitor) LeaveField(ref int) {
 	v.resetWaitExportedRequired(ref)
-	v.resolveTransform(ref)
+	v.resolveTransformForObjectField(ref)
 	if v.currentFields[len(v.currentFields)-1].popFieldRef == ref {
 		v.currentFields = v.currentFields[:len(v.currentFields)-1]
 		delete(v.currentFieldIndexes, ref)
@@ -721,7 +721,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 		}
 		switch typeDefinitionNode.Kind {
 		case ast.NodeKindScalarTypeDefinition:
-			fieldExport := v.resolveFieldExport(fieldRef)
+			fieldExport := v.resolveFieldExport(fieldRef, path)
 			switch typeName {
 			case "String":
 				return &resolve.String{
@@ -754,6 +754,10 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 				if fieldExport != nil && isJsonResult {
 					fieldExport.AsString = false
 				}
+				if unescapeResponseJson || isJsonResult {
+					currentField := v.currentField
+					v.Walker.Defer(func() { v.resolveTransformForField(fieldRef, currentField) })
+				}
 				return &resolve.String{
 					Path:                 path,
 					Nullable:             nullable,
@@ -767,7 +771,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 			return &resolve.String{
 				Path:                 path,
 				Nullable:             nullable,
-				Export:               v.resolveFieldExport(fieldRef),
+				Export:               v.resolveFieldExport(fieldRef, path),
 				UnescapeResponseJson: unescapeResponseJson,
 			}
 		case ast.NodeKindObjectTypeDefinition, ast.NodeKindInterfaceTypeDefinition, ast.NodeKindUnionTypeDefinition:
@@ -796,7 +800,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 	}
 }
 
-func (v *Visitor) resolveFieldExport(fieldRef int) *resolve.FieldExport {
+func (v *Visitor) resolveFieldExport(fieldRef int, path []string) *resolve.FieldExport {
 	if !v.Operation.Fields[fieldRef].HasDirectives {
 		return nil
 	}
@@ -820,10 +824,11 @@ func (v *Visitor) resolveFieldExport(fieldRef int) *resolve.FieldExport {
 	if !ok {
 		return nil
 	}
-	v.exportedVariables[exportAs] = len(v.exportedVariables)
 
 	variableType := v.Operation.VariableDefinitions[variableDefinition].Type
-	fieldExport := &resolve.FieldExport{Path: []string{exportAs}, AsArray: v.Operation.IsListType(variableType)}
+	fieldExport := &resolve.FieldExport{Path: []string{exportAs}, FromArray: path == nil, AsArray: v.Operation.IsListType(variableType)}
+	fieldExport.Index = len(v.exportedVariables)
+	v.exportedVariables[exportAs] = fieldExport
 	typeName := v.Operation.ResolveTypeNameString(variableType)
 	switch typeName {
 	case "Int", "Float":
@@ -959,7 +964,7 @@ func (v *Visitor) resolveFieldPath(ref int) []string {
 func (v *Visitor) EnterDocument(operation, definition *ast.Document) {
 	v.Operation, v.Definition = operation, definition
 	v.fieldConfigs = map[int]*FieldConfiguration{}
-	v.exportedVariables = map[string]int{}
+	v.exportedVariables = map[string]*resolve.FieldExport{}
 	v.skipFields = map[int]resolve.SkipDirective{}
 	v.includeFields = map[int]resolve.IncludeDirective{}
 	v.currentFieldIndexes = map[int]int{}

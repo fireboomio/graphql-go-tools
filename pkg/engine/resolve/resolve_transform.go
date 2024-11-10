@@ -53,23 +53,29 @@ func (r *Resolver) resolveTransformNodeData(node Node, nodeData []byte) ([]byte,
 			return nodeData, false
 		}
 		data, dataType, dataOffset, _ := jsonparser.Get(nodeData, string(ret.Fields[ret.TransformFieldIndex].Name))
-		if dataType == jsonparser.String {
+		switch dataType {
+		case jsonparser.String:
 			data = nodeData[dataOffset-len(data)-2 : dataOffset]
+		case jsonparser.NotExist:
+			data = ret.NodeZeroValue()
 		}
 		return data, true
 	case *String:
 		if len(ret.TransformFieldName) == 0 {
 			return nodeData, false
 		}
-		if ret.FirstRawResult {
+		if ret.FirstRawResult || bytes.HasPrefix(nodeData, literal.LBRACE) && bytes.HasSuffix(nodeData, literal.RBRACE) {
 			data, dataType, dataOffset, _ := jsonparser.Get(nodeData, ret.TransformFieldName)
-			if dataType == jsonparser.String {
+			switch dataType {
+			case jsonparser.String:
 				data = nodeData[dataOffset-len(data)-2 : dataOffset]
+			case jsonparser.NotExist:
+				data = ret.NodeZeroValue()
 			}
 			return data, true
 		}
 		if bytes.Equal(nodeData, literal.ZeroArrayValue) {
-			return nodeData, true
+			return nodeData, false
 		}
 		retCopy := *ret
 		retCopy.FirstRawResult = true
@@ -118,7 +124,7 @@ func (r *Resolver) resolveTransformFieldBuf(ctx *Context, field *Field, fieldBuf
 	}
 
 	transformed = true
-	if len(transformedData) <= len(literal.ZeroArrayValue) {
+	if len(transformedData) <= len(literal.ZeroArrayValue) || bytes.Equal(transformedData, literal.NULL) {
 		if nodeZero, ok := field.TransformDirective.GetNode.(NodeZeroValue); ok {
 			transformedData = nodeZero.NodeZeroValue()
 		} else {
