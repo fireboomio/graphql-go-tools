@@ -379,6 +379,7 @@ type Visitor struct {
 	planners                     []plannerConfiguration
 	fetchConfigurations          []objectFetchConfiguration
 	fieldBuffers                 map[int]int
+	fieldAliases                 map[int]string
 	skipFieldPaths               []string
 	fieldConfigs                 map[int]*FieldConfiguration
 	exportedVariables            map[string]*resolve.FieldExport
@@ -932,17 +933,21 @@ func (v *Visitor) resolveFieldPath(ref int) []string {
 	if config.planner != nil {
 		aliasOverride = config.planner.DataSourcePlanningBehavior().OverrideFieldPathFromAlias
 	}
+	aliasOverride = aliasOverride || v.containsPrismaAliased(ref)
 
 	for i := range v.Config.Fields {
 		if v.Config.Fields[i].TypeName == typeName && v.Config.Fields[i].FieldName == fieldName {
 			if aliasOverride {
 				override, exists := config.planner.DownstreamResponseFieldAlias(ref)
 				if exists {
+					v.fieldAliases[ref] = override
 					return []string{override}
 				}
 			}
 			if aliasOverride && v.Operation.FieldAliasIsDefined(ref) {
-				return []string{v.Operation.FieldAliasString(ref)}
+				aliasString := v.Operation.FieldAliasString(ref)
+				v.fieldAliases[ref] = aliasString
+				return []string{aliasString}
 			}
 			if v.Config.Fields[i].DisableDefaultMapping {
 				return nil
@@ -955,7 +960,11 @@ func (v *Visitor) resolveFieldPath(ref int) []string {
 	}
 
 	if aliasOverride {
-		return []string{v.Operation.FieldAliasOrNameString(ref)}
+		aliasOrName := v.Operation.FieldAliasOrNameString(ref)
+		if v.Operation.FieldAliasIsDefined(ref) {
+			v.fieldAliases[ref] = aliasOrName
+		}
+		return []string{aliasOrName}
 	}
 
 	return []string{fieldName}
@@ -968,6 +977,7 @@ func (v *Visitor) EnterDocument(operation, definition *ast.Document) {
 	v.skipFields = map[int]resolve.SkipDirective{}
 	v.includeFields = map[int]resolve.IncludeDirective{}
 	v.currentFieldIndexes = map[int]int{}
+	v.fieldAliases = map[int]string{}
 }
 
 func (v *Visitor) LeaveDocument(_, _ *ast.Document) {

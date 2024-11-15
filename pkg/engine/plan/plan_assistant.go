@@ -197,6 +197,20 @@ func (v *Visitor) containsFirstRawResult(ref int) bool {
 	return false
 }
 
+func (v *Visitor) containsPrismaAliased(ref int) bool {
+	for _, i := range v.Operation.Fields[ref].Directives.Refs {
+		if v.Operation.DirectiveNameString(i) == "prismaAliased" {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *Visitor) MatchFieldAliasName(ref int, aliasName string) bool {
+	alias, ok := v.fieldAliases[ref]
+	return ok && alias == aliasName
+}
+
 func (v *Visitor) setSkipVariableFuncForFetch(internal objectFetchConfiguration, fetch *resolve.SingleFetch) {
 	if internal.object == nil || len(internal.object.Fields) == 0 {
 		return
