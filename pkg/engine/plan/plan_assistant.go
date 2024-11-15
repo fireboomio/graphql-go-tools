@@ -206,9 +206,9 @@ func (v *Visitor) containsPrismaAliased(ref int) bool {
 	return false
 }
 
-func (v *Visitor) MatchFieldAliasName(ref int, aliasName string) bool {
-	alias, ok := v.fieldAliases[ref]
-	return ok && alias == aliasName
+func (v *Visitor) FieldHasConfig(ref int) bool {
+	_, ok := v.fieldConfigs[ref]
+	return ok
 }
 
 func (v *Visitor) setSkipVariableFuncForFetch(internal objectFetchConfiguration, fetch *resolve.SingleFetch) {
