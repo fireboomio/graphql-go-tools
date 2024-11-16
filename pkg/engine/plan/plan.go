@@ -561,6 +561,16 @@ func (v *Visitor) EnterField(ref int) {
 	fieldDefinitionType := v.Definition.FieldDefinitionType(fieldDefinition)
 	bufferID, hasBuffer := v.fieldBuffers[ref]
 
+	typeName := v.Walker.EnclosingTypeDefinition.NameString(v.Definition)
+	fieldNameStr := v.Operation.FieldNameString(ref)
+	fieldConfig := v.Config.Fields.ForTypeField(typeName, fieldNameStr)
+	if fieldConfig != nil {
+		v.fieldConfigs[ref] = fieldConfig
+		if v.Operation.FieldAliasIsDefined(ref) && !v.Definition.Index.IsRootOperationTypeNameString(typeName) {
+			path = []string{v.Operation.FieldAliasString(ref)}
+		}
+	}
+
 	v.currentField = &resolve.Field{
 		Name:                   fieldAliasOrName,
 		HasBuffer:              hasBuffer,
@@ -574,14 +584,6 @@ func (v *Visitor) EnterField(ref int) {
 	v.currentField.SetWaitExportedRequiredForDirective(v.exportedVariables)
 	v.currentField.Value = v.resolveFieldValue(ref, fieldDefinitionType, true, path)
 	*v.currentFields[len(v.currentFields)-1].fields = append(*v.currentFields[len(v.currentFields)-1].fields, v.currentField)
-
-	typeName := v.Walker.EnclosingTypeDefinition.NameString(v.Definition)
-	fieldNameStr := v.Operation.FieldNameString(ref)
-	fieldConfig := v.Config.Fields.ForTypeField(typeName, fieldNameStr)
-	if fieldConfig == nil {
-		return
-	}
-	v.fieldConfigs[ref] = fieldConfig
 }
 
 func (v *Visitor) resolveFieldPosition(ref int) resolve.Position {

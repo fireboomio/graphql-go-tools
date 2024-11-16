@@ -197,15 +197,6 @@ func (v *Visitor) containsFirstRawResult(ref int) bool {
 	return false
 }
 
-func (v *Visitor) containsPrismaAliased(ref int) bool {
-	for _, i := range v.Operation.Fields[ref].Directives.Refs {
-		if v.Operation.DirectiveNameString(i) == "prismaAliased" {
-			return true
-		}
-	}
-	return false
-}
-
 func (v *Visitor) FieldHasConfig(ref int) bool {
 	_, ok := v.fieldConfigs[ref]
 	return ok
