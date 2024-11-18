@@ -566,7 +566,9 @@ func (v *Visitor) EnterField(ref int) {
 	fieldConfig := v.Config.Fields.ForTypeField(typeName, fieldNameStr)
 	if fieldConfig != nil {
 		v.fieldConfigs[ref] = fieldConfig
-		if v.Operation.FieldAliasIsDefined(ref) && !v.Definition.Index.IsRootOperationTypeNameString(typeName) {
+		if v.Operation.FieldAliasIsDefined(ref) &&
+			!v.Definition.Index.IsRootOperationTypeNameString(typeName) &&
+			!v.Definition.Index.IsRootOperationTypeNameString(v.Definition.ResolveTypeNameString(fieldDefinitionType)) {
 			path = []string{v.Operation.FieldAliasString(ref)}
 		}
 	}
