@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/buger/jsonparser"
+	"golang.org/x/exp/slices"
 	"reflect"
 	"regexp"
 	"strings"
@@ -758,7 +759,7 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 				if fieldExport != nil && isJsonResult {
 					fieldExport.AsString = false
 				}
-				if unescapeResponseJson || isJsonResult {
+				if unescapeResponseJson || isJsonResult || slices.Contains(path, resolve.QueryRawKey) {
 					currentField := v.currentField
 					v.Walker.Defer(func() { v.resolveTransformForField(fieldRef, currentField) })
 				}
