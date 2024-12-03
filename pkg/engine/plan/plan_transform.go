@@ -8,19 +8,12 @@ import (
 )
 
 func (v *Visitor) resolveTransformForObjectField(ref int) {
-	var currentField *resolve.Field
-	if strVal, ok := v.currentField.Value.(*resolve.String); ok && slices.Contains(strVal.Path, resolve.QueryRawKey) {
-		currentField = v.currentField
-	}
 	index, ok := v.currentFieldIndexes[ref]
-	if ok && index < len(v.currentFields) {
-		currentField = v.currentFields[index].popField
-	}
-	if currentField == nil {
+	if !ok || index >= len(v.currentFields) {
 		return
 	}
 
-	v.resolveTransformForField(ref, currentField)
+	v.resolveTransformForField(ref, v.currentFields[index].popField)
 }
 
 func (v *Visitor) resolveTransformForField(ref int, field *resolve.Field) {
