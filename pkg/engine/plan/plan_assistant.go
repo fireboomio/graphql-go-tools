@@ -9,6 +9,8 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+var EnumScalarNameFetch func(string) string
+
 func (v *Visitor) setWaitExportedRequiredForArguments(config objectFetchConfiguration) {
 	objectPopField := config.objectPopField
 	if objectPopField == nil {

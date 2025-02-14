@@ -773,6 +773,10 @@ func (v *Visitor) resolveFieldValue(fieldRef, typeRef int, nullable bool, path [
 				}
 			}
 		case ast.NodeKindEnumTypeDefinition:
+			if EnumScalarNameFetch != nil {
+				scalarName := EnumScalarNameFetch(v.Definition.EnumTypeDefinitionDescriptionString(typeDefinitionNode.Ref))
+				unescapeResponseJson = unescapeResponseJson || scalarName != ""
+			}
 			return &resolve.String{
 				Path:                 path,
 				Nullable:             nullable,
